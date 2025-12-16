@@ -1,0 +1,22 @@
+#!/bin/bash -eu
+
+keystone_addr=`juju config keystone vip`
+if [ -z "$keystone_addr" ]; then
+    keystone_addr=$(juju status --format=json | jq --raw-output '.applications.keystone.units[] | select (.leader == true) | .["public-address"]')
+fi
+
+_CONFIG_PASSWD="$(juju config keystone admin-password| awk '{print tolower($0)}')"
+if [ "${_CONFIG_PASSWD}" == "none" ] || [ "${_CONFIG_PASSWD}" == "" ]; then
+    export OS_PASSWORD=$(juju exec --unit keystone/leader leader-get admin_passwd)
+else
+export OS_PASSWORD="$(juju config keystone admin-password)"
+fi
+
+export OS_USERNAME=admin
+export OS_USER_DOMAIN_NAME=admin_domain
+export OS_PROJECT_NAME=admin
+export OS_PROJECT_DOMAIN_NAME=admin_domain
+export OS_AUTH_URL=http://${keystone_addr}:5000/v3
+export OS_AUTH_TYPE=password
+export OS_REGION_NAME=RegionOne
+export OS_IDENTITY_API_VERSION=3

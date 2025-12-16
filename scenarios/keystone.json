@@ -1,0 +1,105 @@
+{
+  "Authenticate.keystone": [
+    {
+      "runner": {
+        "type": "constant",
+        "times": 100
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 50
+        }
+      }
+    }
+  ],
+  "KeystoneBasic.create_update_and_delete_tenant": [
+    {
+      "runner": {
+        "type": "rps",
+        "times": 20,
+        "rps": {
+          "start": 10,
+          "end": 200,
+          "step": 10,
+          "duration": 10
+        },
+        "max_concurrency": 1
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 0
+        }
+      }
+    }
+  ],
+  "KeystoneBasic.add_and_remove_user_role": [
+    {
+      "runner": {
+        "type": "rps",
+        "times": 100,
+        "rps": {
+          "start": 10000,
+          "end": 100000,
+          "step": 1000,
+          "duration": 10
+        },
+        "max_concurrency": 4
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 100
+        }
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 0
+        }
+      }
+    }
+  ],
+  "KeystoneBasic.create_delete_user": [
+    {
+      "runner": {
+        "type": "rps",
+        "times": 20,
+        "rps": {
+          "start": 100,
+          "end": 2000,
+          "step": 100,
+          "duration": 10
+        },
+        "max_concurrency": 1
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 0
+        }
+      }
+    }
+  ],
+  "KeystoneBasic.create_tenant_with_users": [
+    {
+      "args": {
+        "users_per_tenant": 100
+      },
+      "runner": {
+        "type": "rps",
+        "times": 20,
+        "rps": {
+          "start": 100,
+          "end": 2000,
+          "step": 100,
+          "duration": 10
+        },
+        "max_concurrency": 1
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 0
+        }
+      }
+    }
+  ]
+}

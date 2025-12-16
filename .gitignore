@@ -1,0 +1,9 @@
+# TF specifc ignores
+
+.terraform
+.terraform.lock.hcl
+*.tfstate*
+
+# IDE specific ignores
+.idea
+.vscode
