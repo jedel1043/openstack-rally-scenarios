@@ -2,9 +2,9 @@
   "Authenticate.keystone": [
     {
       "runner": {
-        "type": "rps",
-        "times": 50,
-        "rps": 50
+        "type": "constant",
+        "times": 10,
+        "concurrency": 2
       },
       "context": {
         "users": {
@@ -24,15 +24,9 @@
   "KeystoneBasic.create_update_and_delete_tenant": [
     {
       "runner": {
-        "type": "rps",
-        "times": 20,
-        "rps": {
-          "start": 10,
-          "end": 200,
-          "step": 10,
-          "duration": 10
-        },
-        "max_concurrency": 1
+        "type": "constant",
+        "times": 10,
+        "concurrency": 2
       },
       "sla": {
         "failure_rate": {
@@ -44,15 +38,9 @@
   "KeystoneBasic.create_delete_user": [
     {
       "runner": {
-        "type": "rps",
-        "times": 20,
-        "rps": {
-          "start": 10,
-          "end": 200,
-          "step": 10,
-          "duration": 10
-        },
-        "max_concurrency": 1
+        "type": "constant",
+        "times": 10,
+        "concurrency": 2
       },
       "sla": {
         "failure_rate": {
@@ -64,15 +52,9 @@
   "KeystoneBasic.add_and_remove_user_role": [
     {
       "runner": {
-        "type": "rps",
-        "times": 20,
-        "rps": {
-          "start": 10,
-          "end": 200,
-          "step": 10,
-          "duration": 10
-        },
-        "max_concurrency": 1
+        "type": "constant",
+        "times": 10,
+        "concurrency": 2
       },
       "context": {
         "users": {

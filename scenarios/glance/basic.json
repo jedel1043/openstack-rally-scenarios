@@ -3,7 +3,8 @@
     {
       "runner": {
         "type": "constant",
-        "times": 100
+        "times": 10,
+        "concurrency": 2
       },
       "context": {
         "users": {
@@ -26,21 +27,17 @@
   ],
   "GlanceImages.create_and_download_image": [
     {
-      "image_location": "http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img",
-      "container_format": "bare",
-      "disk_format": "qcow2",
-      "runner": {
-        "type": "rps",
-        "times": 20,
-        "rps": {
-          "start": 10,
-          "end": 200,
-          "step": 10,
-          "duration": 10
-        },
-        "max_concurrency": 1
+      "args": {
+        "image_location": "http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img",
+        "container_format": "bare",
+        "disk_format": "qcow2"
       },
-      "contexts": {
+      "runner": {
+        "type": "constant",
+        "times": 10,
+        "concurrency": 2
+      },
+      "context": {
         "users": {
           "tenants": 3,
           "users_per_tenant": 10
@@ -55,9 +52,11 @@
   ],
   "GlanceImages.create_and_delete_image": [
     {
-      "image_location": "http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img",
-      "container_format": "bare",
-      "disk_format": "qcow2",
+      "args": {
+        "image_location": "http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img",
+        "container_format": "bare",
+        "disk_format": "qcow2"
+      },
       "runner": {
         "type": "constant",
         "times": 10,
