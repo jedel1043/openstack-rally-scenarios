@@ -2,13 +2,21 @@
   "Authenticate.keystone": [
     {
       "runner": {
-        "type": "constant",
-        "times": 100
+        "type": "rps",
+        "times": 50,
+        "rps": 50
       },
       "context": {
         "users": {
           "tenants": 3,
           "users_per_tenant": 50
+        }
+      },
+      "sla": {
+        "max_avg_duration": 5,
+        "max_seconds_per_iteration": 10,
+        "failure_rate": {
+          "max": 0
         }
       }
     }
@@ -33,41 +41,15 @@
       }
     }
   ],
-  "KeystoneBasic.add_and_remove_user_role": [
-    {
-      "runner": {
-        "type": "rps",
-        "times": 100,
-        "rps": {
-          "start": 10000,
-          "end": 100000,
-          "step": 1000,
-          "duration": 10
-        },
-        "max_concurrency": 4
-      },
-      "context": {
-        "users": {
-          "tenants": 3,
-          "users_per_tenant": 100
-        }
-      },
-      "sla": {
-        "failure_rate": {
-          "max": 0
-        }
-      }
-    }
-  ],
   "KeystoneBasic.create_delete_user": [
     {
       "runner": {
         "type": "rps",
         "times": 20,
         "rps": {
-          "start": 100,
-          "end": 2000,
-          "step": 100,
+          "start": 10,
+          "end": 200,
+          "step": 10,
           "duration": 10
         },
         "max_concurrency": 1
@@ -79,21 +61,24 @@
       }
     }
   ],
-  "KeystoneBasic.create_tenant_with_users": [
+  "KeystoneBasic.add_and_remove_user_role": [
     {
-      "args": {
-        "users_per_tenant": 100
-      },
       "runner": {
         "type": "rps",
         "times": 20,
         "rps": {
-          "start": 100,
-          "end": 2000,
-          "step": 100,
+          "start": 10,
+          "end": 200,
+          "step": 10,
           "duration": 10
         },
         "max_concurrency": 1
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 10
+        }
       },
       "sla": {
         "failure_rate": {
