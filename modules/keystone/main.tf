@@ -7,38 +7,33 @@ terraform {
   }
 }
 
-provider "juju" {}
-
-resource "juju_model" "openstack" {
-  name = "openstack"
+variable "model_uuid" {
+  description = "Model UUID where all applications will be deployed"
+  type        = string
+  nullable    = false
 }
 
-resource "juju_application" "mysql" {
-  name = "mysql"
+variable "mysql" {
+  description = "Name of the MySQL application"
+  type        = string
+  nullable    = false
+}
 
-  model_uuid = juju_model.openstack.uuid
 
-  charm {
-    name    = "mysql-innodb-cluster"
-    channel = "latest/edge"
-    base    = "ubuntu@24.04"
-  }
+data "juju_model" "openstack" {
+  uuid = var.model_uuid
+}
 
-  units = 3
 
-  constraints = "mem=4G"
-
-  config = {
-    innodb-buffer-pool-size = "50%"
-    max-connections         = 20000
-    tuning-level            = "fast"
-  }
+data "juju_application" "mysql" {
+  name       = var.mysql
+  model_uuid = data.juju_model.openstack.uuid
 }
 
 resource "juju_application" "mysql-router" {
-  name = "mysql-router"
+  name = "keystone-mysql-router"
 
-  model_uuid = juju_model.openstack.uuid
+  model_uuid = data.juju_model.openstack.uuid
 
   charm {
     name    = "mysql-router"
@@ -50,7 +45,7 @@ resource "juju_application" "mysql-router" {
 resource "juju_application" "keystone" {
   name = "keystone"
 
-  model_uuid = juju_model.openstack.uuid
+  model_uuid = data.juju_model.openstack.uuid
 
   charm {
     name    = "keystone"
@@ -69,11 +64,11 @@ resource "juju_application" "keystone" {
   }
 }
 
-resource "juju_integration" "mysql-to-router" {
-  model_uuid = juju_model.openstack.uuid
+resource "juju_integration" "db-router" {
+  model_uuid = data.juju_model.openstack.uuid
 
   application {
-    name     = juju_application.mysql.name
+    name     = data.juju_application.mysql.name
     endpoint = "db-router"
   }
 
@@ -83,8 +78,8 @@ resource "juju_integration" "mysql-to-router" {
   }
 }
 
-resource "juju_integration" "router-to-keystone" {
-  model_uuid = juju_model.openstack.uuid
+resource "juju_integration" "shared-db" {
+  model_uuid = data.juju_model.openstack.uuid
 
   application {
     name     = juju_application.keystone.name
@@ -95,4 +90,9 @@ resource "juju_integration" "router-to-keystone" {
     name     = juju_application.mysql-router.name
     endpoint = "shared-db"
   }
+}
+
+output "app_name" {
+  description = "Name of the Keystone application"
+  value       = juju_application.keystone.name
 }
