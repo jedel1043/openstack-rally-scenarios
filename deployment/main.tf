@@ -45,7 +45,7 @@ resource "juju_application" "mysql" {
   }
 }
 
-resource "juju_application" "rabbitmq-server" {
+resource "juju_application" "rabbitmq" {
   count      = var.designate ? 1 : 0
   name       = "rabbitmq-server"
   model_uuid = juju_model.openstack.uuid
@@ -92,7 +92,17 @@ module "glance" {
   count      = var.glance ? 1 : 0
   source     = "../modules/glance"
   model_uuid = juju_model.openstack.uuid
+  keystone   = module.keystone.app_name
   mysql      = juju_application.mysql.name
   ceph       = module.ceph[0].app_name
+}
+
+module "designate" {
+  count      = var.designate ? 1 : 0
+  source     = "../modules/designate"
+  model_uuid = juju_model.openstack.uuid
   keystone   = module.keystone.app_name
+  mysql      = juju_application.mysql.name
+  rabbitmq   = juju_application.rabbitmq[0].name
+  memcached  = juju_application.memcached[0].name
 }

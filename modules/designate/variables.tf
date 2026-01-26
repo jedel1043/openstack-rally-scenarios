@@ -16,7 +16,7 @@ variable "keystone" {
   nullable    = false
 }
 
-variable "rabbit-mq" {
+variable "rabbitmq" {
   description = "Name of the RabbitMQ application"
   type        = string
   nullable    = false
@@ -28,8 +28,12 @@ variable "memcached" {
   nullable    = false
 }
 
-variable "upstream_dns_server" {
-  description = "Designate BIND upstream DNS server to forward requests to"
-  type        = string
-  default     = null
+variable "upstream_dns_servers" {
+  description = "Designate BIND upstream DNS servers to forward requests to"
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = alltrue([for hostname in var.upstream_dns_servers : can(cidrhost(hostname, 0))])
+    error_message = "Upstream DNS server IP addresses must be valid."
+  }
 }

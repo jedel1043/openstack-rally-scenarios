@@ -1,0 +1,36 @@
+{
+  "DesignateBasic.create_and_delete_recordsets": [
+    {
+      "args": {
+        "recordsets_per_zone": 10
+      },
+      "runner": {
+        "type": "rps",
+        "times": 5,
+        "rps": 50
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 10
+        },
+        "quotas": {
+          "designate": {
+            "zones": 100,
+            "zone_recordsets": 2000,
+            "zone_records": 2000,
+            "recordset_records": 2000
+          }
+        },
+        "zones": {
+          "zones_per_tenant": 1
+        }
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 0
+        }
+      }
+    }
+  ]
+}

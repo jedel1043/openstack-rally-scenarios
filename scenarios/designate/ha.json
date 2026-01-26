@@ -2,9 +2,7 @@
   "GlanceImages.create_and_download_image": [
     {
       "args": {
-        "image_location": "http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img",
-        "container_format": "bare",
-        "disk_format": "qcow2"
+        "recordsets_per_zone": 10
       },
       "runner": {
         "type": "rps",
@@ -15,7 +13,18 @@
       "context": {
         "users": {
           "tenants": 3,
-          "users_per_tenant": 10
+          "users_per_tenant": 50
+        },
+        "quotas": {
+          "designate": {
+            "zones": 100,
+            "zone_recordsets": 2000,
+            "zone_records": 2000,
+            "recordset_records": 2000
+          }
+        },
+        "zones": {
+          "zones_per_tenant": 1
         }
       },
       "sla": {

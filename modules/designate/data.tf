@@ -23,13 +23,13 @@ data "juju_application" "memcached" {
 }
 
 data "external" "local_upstream_dns" {
-  program = ["/bin/bash", "-,", <<EOF
-    if command -v systemd-resolve > /dev/null; then
-        local server=$(systemd-resolve --status 2> /dev/null | sed --regexp-extended 's/\s*DNS Servers:\s+([[:digit:]]+)/\1/g;t;d'| head -n 1)
-    else
-        local server=$(resolvectl 2> /dev/null | sed --regexp-extended 's/\s*Current DNS Server:\s+([[:digit:]]+)/\1/g;t;d')
-    fi
-    jq -n --arg server-ip "$server" '$ARGS.named'
-  EOF
+  program = ["/bin/bash", "-c", <<EOF
+      if command -v systemd-resolve > /dev/null; then
+          servers=$(systemd-resolve --status 2> /dev/null | sed --regexp-extended 's/\s*DNS Servers:\s+([[:digit:]]+)/\1/g;t;d'| head -n 1)
+      else
+          servers=$(resolvectl 2> /dev/null | sed --regexp-extended 's/\s*Current DNS Server:\s+([[:digit:]]+)/\1/g;t;d')
+      fi
+      jq -Rsc '. / "\n" - [""] | tostring | {servers: .}' <<< $servers
+    EOF
   ]
 }
