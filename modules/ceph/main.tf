@@ -56,9 +56,8 @@ resource "juju_application" "ceph-osd" {
   constraints = "mem=2G"
 
   config = {
-    source      = "distro"
-    loglevel    = 1
-    osd-devices = ""
+    source   = "distro"
+    loglevel = 1
     config-flags = jsonencode({
       osd = {
         "osd memory target" = 1073741824

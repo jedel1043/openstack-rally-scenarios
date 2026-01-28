@@ -81,3 +81,17 @@ resource "juju_integration" "coordinator-memcached" {
     endpoint = "cache"
   }
 }
+
+resource "juju_integration" "dnsaas" {
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.designate.name
+    endpoint = "dnsaas"
+  }
+
+  application {
+    name     = data.juju_application.neutron_api.name
+    endpoint = "external-dns"
+  }
+}

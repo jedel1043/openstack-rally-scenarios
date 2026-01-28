@@ -7,15 +7,6 @@ terraform {
   }
 }
 
-locals {
-  dns-forwarders = coalescelist(
-    var.upstream_dns_servers,
-    jsondecode(
-      data.external.local_upstream_dns.result.servers
-    )
-  )
-}
-
 resource "juju_application" "mysql-router" {
   name = "designate-mysql-router"
 
@@ -46,19 +37,12 @@ resource "juju_application" "designate" {
   config = {
     debug       = false
     verbose     = false
-    nameservers = "ns1.openstack.qa.1ss."
+    nameservers = "ns1.${var.dns_domain}"
   }
 }
 
 resource "juju_application" "designate-bind" {
   name = "designate-bind"
-
-  lifecycle {
-    precondition {
-      condition     = length(local.dns-forwarders) > 0
-      error_message = "Must specify at least one DNS forwarder server."
-    }
-  }
 
   model_uuid = data.juju_model.openstack.uuid
 
@@ -73,6 +57,6 @@ resource "juju_application" "designate-bind" {
   constraints = "mem=1G"
 
   config = {
-    forwarders = join(";", local.dns-forwarders)
+    forwarders = join(";", var.forwarders)
   }
 }

@@ -22,20 +22,24 @@ variable "rabbitmq" {
   nullable    = false
 }
 
-variable "memcached" {
-  description = "Name of the Memcached application"
-  type        = string
-  nullable    = false
+variable "certificates" {
+  description = "Name of the application offering certificates and its endpoint"
+  type = object({
+    name     = string
+    endpoint = string
+  })
+  nullable = false
 }
 
-variable "neutron_api" {
-  description = "Name of the Neutron-API application"
-  type        = string
+variable "neutron_api_options" {
+  description = "Additional options to provide to the Neutron API application"
+  type        = map(string)
   nullable    = false
+  default     = {}
 }
 
 variable "dns_domain" {
-  description = "DNS domain name that should be used for building instance hostnames."
+  description = "DNS domain name that should be used for building instance hostnames"
   type        = string
   nullable    = false
   validation {
@@ -44,12 +48,12 @@ variable "dns_domain" {
   }
 }
 
-variable "forwarders" {
+variable "dns_servers" {
   description = "Designate BIND upstream DNS servers to forward requests to"
   type        = list(string)
   nullable    = false
   validation {
-    condition     = length(var.forwarders) > 0
+    condition     = length(var.dns_servers) > 0
     error_message = "Must specify at least one DNS server."
   }
 }

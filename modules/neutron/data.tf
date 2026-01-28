@@ -17,12 +17,7 @@ data "juju_application" "rabbitmq" {
   model_uuid = data.juju_model.openstack.uuid
 }
 
-data "juju_application" "memcached" {
-  name       = var.memcached
-  model_uuid = data.juju_model.openstack.uuid
-}
-
-data "juju_application" "neutron_api" {
-  name       = var.neutron_api
+data "juju_application" "certificates" {
+  name       = var.certificates.name
   model_uuid = data.juju_model.openstack.uuid
 }
