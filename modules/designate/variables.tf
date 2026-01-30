@@ -34,6 +34,23 @@ variable "neutron_api" {
   nullable    = false
 }
 
+variable "certificates" {
+  description = "Name and endpoint of the SSL certificates application"
+  type = object({
+    name     = string
+    endpoint = string
+  })
+  nullable = false
+
+  validation {
+    condition = (
+      length(trimspace(var.certificates.name)) > 0 &&
+      length(trimspace(var.certificates.endpoint)) > 0
+    )
+    error_message = "Name and endpoint for the certificates application must not be empty."
+  }
+}
+
 variable "dns_domain" {
   description = "DNS domain name that should be used for building instance hostnames."
   type        = string

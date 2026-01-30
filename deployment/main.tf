@@ -59,81 +59,25 @@ locals {
     var.upstream_dns_servers,
     jsondecode(data.external.local_upstream_dns.result.servers)
   )
-  dns_domain = "openstack.qa.1ss."
-  neutron    = var.neutron || var.designate
-  rabbitmq   = local.neutron
+  dns_domain   = "openstack.qa.1ss."
+  neutron      = var.neutron || var.designate
+  rabbitmq     = local.neutron
+  certificates = local.neutron
 }
 
-resource "juju_model" "openstack" {
-  name = "openstack"
-}
-
-resource "juju_application" "mysql" {
-  name       = "mysql"
-  model_uuid = juju_model.openstack.uuid
-
-  charm {
-    name    = "mysql-innodb-cluster"
-    channel = "latest/edge"
-    base    = "ubuntu@24.04"
-  }
-  units       = 3
-  constraints = "mem=4G"
-  config = {
-    innodb-buffer-pool-size = "50%"
-    max-connections         = 20000
-    tuning-level            = "fast"
-  }
-}
-
-resource "juju_application" "rabbitmq" {
-  count      = local.rabbitmq ? 1 : 0
-  name       = "rabbitmq-server"
-  model_uuid = juju_model.openstack.uuid
-
-  charm {
-    name    = "rabbitmq-server"
-    channel = "latest/edge"
-    base    = "ubuntu@24.04"
-  }
-  units       = 3
-  constraints = "mem=1G"
-  config = {
-    min-cluster-size = 1
-  }
-}
-
-resource "juju_application" "memcached" {
-  count      = var.designate ? 1 : 0
-  name       = "memcached"
-  model_uuid = juju_model.openstack.uuid
-
-  charm {
-    name    = "memcached"
-    channel = "latest/stable"
-    base    = "ubuntu@22.04"
-  }
-  units       = 2
-  constraints = "mem=2G"
-}
-
-resource "juju_application" "easyrsa" {
-  count      = local.neutron ? 1 : 0
-  name       = "easyrsa"
-  model_uuid = juju_model.openstack.uuid
-
-  charm {
-    name    = "easyrsa"
-    channel = "latest/stable"
-    base    = "ubuntu@24.04"
-  }
-  units = 1
+locals {
+  certificates_info = length(juju_application.vault) > 0 ? {
+    name     = juju_application.vault[0].name
+    endpoint = "certificates"
+  } : null
 }
 
 module "keystone" {
   source     = "../modules/keystone"
   model_uuid = juju_model.openstack.uuid
   mysql      = juju_application.mysql.name
+
+  certificates = local.certificates_info
 }
 
 module "ceph" {
@@ -143,12 +87,13 @@ module "ceph" {
 }
 
 module "glance" {
-  count      = var.glance ? 1 : 0
-  source     = "../modules/glance"
-  model_uuid = juju_model.openstack.uuid
-  keystone   = module.keystone.app_name
-  mysql      = juju_application.mysql.name
-  ceph       = module.ceph[0].app_name
+  count        = var.glance ? 1 : 0
+  source       = "../modules/glance"
+  model_uuid   = juju_model.openstack.uuid
+  keystone     = module.keystone.app_name
+  mysql        = juju_application.mysql.name
+  ceph         = module.ceph[0].app_name
+  certificates = local.certificates_info
 }
 
 module "neutron" {
@@ -161,23 +106,21 @@ module "neutron" {
   neutron_api_options = var.designate ? {
     reverse-dns-lookup = true
   } : {}
-  dns_domain  = local.dns_domain
-  dns_servers = local.dns_servers
-  certificates = {
-    name     = juju_application.easyrsa[0].name
-    endpoint = "client"
-  }
+  dns_domain   = local.dns_domain
+  dns_servers  = local.dns_servers
+  certificates = local.certificates_info
 }
 
 module "designate" {
-  count       = var.designate ? 1 : 0
-  source      = "../modules/designate"
-  model_uuid  = juju_model.openstack.uuid
-  keystone    = module.keystone.app_name
-  mysql       = juju_application.mysql.name
-  rabbitmq    = juju_application.rabbitmq[0].name
-  memcached   = juju_application.memcached[0].name
-  neutron_api = module.neutron[0].app_name
-  dns_domain  = local.dns_domain
-  forwarders  = local.dns_servers
+  count        = var.designate ? 1 : 0
+  source       = "../modules/designate"
+  model_uuid   = juju_model.openstack.uuid
+  keystone     = module.keystone.app_name
+  mysql        = juju_application.mysql.name
+  rabbitmq     = juju_application.rabbitmq[0].name
+  memcached    = juju_application.memcached[0].name
+  neutron_api  = module.neutron[0].app_name
+  dns_domain   = local.dns_domain
+  forwarders   = local.dns_servers
+  certificates = local.certificates_info
 }

@@ -23,7 +23,7 @@ variable "rabbitmq" {
 }
 
 variable "certificates" {
-  description = "Name of the application offering certificates and its endpoint"
+  description = "Name and endpoint of the SSL certificates application"
   type = object({
     name     = string
     endpoint = string

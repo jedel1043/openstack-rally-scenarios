@@ -12,6 +12,20 @@ resource "juju_integration" "identity-service" {
   }
 }
 
+resource "juju_integration" "certificates" {
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.designate.name
+    endpoint = "certificates"
+  }
+
+  application {
+    name     = data.juju_application.certificates.name
+    endpoint = var.certificates.endpoint
+  }
+}
+
 resource "juju_integration" "db-router" {
   model_uuid = data.juju_model.openstack.uuid
 

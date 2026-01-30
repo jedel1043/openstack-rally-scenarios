@@ -53,3 +53,18 @@ resource "juju_integration" "shared-db" {
     endpoint = "shared-db"
   }
 }
+
+resource "juju_integration" "certificates" {
+  count      = length(data.juju_application.certificates)
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.glance.name
+    endpoint = "certificates"
+  }
+
+  application {
+    name     = data.juju_application.certificates[0].name
+    endpoint = var.certificates.endpoint
+  }
+}

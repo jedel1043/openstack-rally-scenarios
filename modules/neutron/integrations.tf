@@ -82,6 +82,20 @@ resource "juju_integration" "ovsdb-cms" {
   }
 }
 
+resource "juju_integration" "neutron-api-certificates" {
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.neutron-api.name
+    endpoint = "certificates"
+  }
+
+  application {
+    name     = data.juju_application.certificates.name
+    endpoint = var.certificates.endpoint
+  }
+}
+
 resource "juju_integration" "neutron-ovn-certificates" {
   model_uuid = data.juju_model.openstack.uuid
 
