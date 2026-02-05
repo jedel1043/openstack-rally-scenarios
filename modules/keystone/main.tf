@@ -39,6 +39,16 @@ variable "certificates" {
   }
 }
 
+variable "vip" {
+  description = "Virtual IP to use to front the Keystone service."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = var.vip != ""
+    error_message = "Virtual IP must not be empty."
+  }
+}
+
 data "juju_model" "openstack" {
   uuid = var.model_uuid
 }
@@ -82,9 +92,26 @@ resource "juju_application" "keystone" {
   constraints = "mem=4G"
 
   config = {
-    debug            = true
-    verbose          = true
+    debug            = false
+    verbose          = false
     openstack-origin = "distro"
+    vip              = var.vip
+  }
+}
+
+resource "juju_application" "hacluster" {
+  name = "keystone-hacluster"
+
+  model_uuid = data.juju_model.openstack.uuid
+
+  charm {
+    name    = "hacluster"
+    channel = "2.4/edge"
+    base    = "ubuntu@24.04"
+  }
+
+  config = {
+    cluster_count = 3
   }
 }
 
@@ -128,6 +155,20 @@ resource "juju_integration" "certificates" {
   application {
     name     = data.juju_application.certificates[0].name
     endpoint = var.certificates.endpoint
+  }
+}
+
+resource "juju_integration" "ha" {
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.keystone.name
+    endpoint = "ha"
+  }
+
+  application {
+    name     = juju_application.hacluster.name
+    endpoint = "ha"
   }
 }
 

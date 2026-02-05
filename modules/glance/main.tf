@@ -26,6 +26,23 @@ resource "juju_application" "glance" {
     debug            = false
     verbose          = false
     openstack-origin = "distro"
+    vip              = var.vip
+  }
+}
+
+resource "juju_application" "hacluster" {
+  name = "glance-hacluster"
+
+  model_uuid = data.juju_model.openstack.uuid
+
+  charm {
+    name    = "hacluster"
+    channel = "2.4/edge"
+    base    = "ubuntu@24.04"
+  }
+
+  config = {
+    cluster_count = 3
   }
 }
 

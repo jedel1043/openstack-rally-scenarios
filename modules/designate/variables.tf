@@ -4,6 +4,16 @@ variable "model_uuid" {
   nullable    = false
 }
 
+variable "vip" {
+  description = "Virtual IP to use to front the Designate service."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = var.vip != ""
+    error_message = "Virtual IP must not be empty."
+  }
+}
+
 variable "mysql" {
   description = "Name of the MySQL application"
   type        = string

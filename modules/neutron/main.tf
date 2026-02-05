@@ -47,9 +47,26 @@ resource "juju_application" "neutron-api" {
       manage-neutron-plugin-legacy-mode = false
       enable-ml2-dns                    = true
       dns-domain                        = var.dns_domain
+      vip                               = var.vip
     },
     var.neutron_api_options
   )
+}
+
+resource "juju_application" "hacluster" {
+  name = "neutron-api-hacluster"
+
+  model_uuid = data.juju_model.openstack.uuid
+
+  charm {
+    name    = "hacluster"
+    channel = "2.4/edge"
+    base    = "ubuntu@24.04"
+  }
+
+  config = {
+    cluster_count = 3
+  }
 }
 
 resource "juju_application" "neutron-ovn" {
@@ -87,7 +104,6 @@ resource "juju_application" "ovn-central" {
   }
 }
 
-
 # Move into nova-compute when testing it
 # resource "juju_application" "ovn-chassis" {
 #   name = "ovn-chassis"
@@ -106,7 +122,6 @@ resource "juju_application" "ovn-central" {
 #     prefer-chassis-as-gw      = true
 #   }
 # }
-
 
 output "app_name" {
   description = "Name of the Neutron API application"

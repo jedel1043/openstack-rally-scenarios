@@ -109,3 +109,17 @@ resource "juju_integration" "dnsaas" {
     endpoint = "external-dns"
   }
 }
+
+resource "juju_integration" "ha" {
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.designate.name
+    endpoint = "ha"
+  }
+
+  application {
+    name     = juju_application.hacluster.name
+    endpoint = "ha"
+  }
+}

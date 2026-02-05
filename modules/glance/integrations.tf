@@ -68,3 +68,17 @@ resource "juju_integration" "certificates" {
     endpoint = var.certificates.endpoint
   }
 }
+
+resource "juju_integration" "ha" {
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.glance.name
+    endpoint = "ha"
+  }
+
+  application {
+    name     = juju_application.hacluster.name
+    endpoint = "ha"
+  }
+}

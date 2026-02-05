@@ -124,6 +124,20 @@ resource "juju_integration" "ovn-central-certificates" {
   }
 }
 
+resource "juju_integration" "ha" {
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.neutron-api.name
+    endpoint = "ha"
+  }
+
+  application {
+    name     = juju_application.hacluster.name
+    endpoint = "ha"
+  }
+}
+
 # Move into nova-compute when testing it
 # resource "juju_integration" "ovsdb" {
 #   model_uuid = data.juju_model.openstack.uuid

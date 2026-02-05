@@ -38,7 +38,7 @@ resource "juju_application" "rabbitmq" {
 }
 
 resource "juju_application" "memcached" {
-  count      = var.designate ? 1 : 0
+  count      = local.designate ? 1 : 0
   name       = "memcached"
   model_uuid = juju_model.openstack.uuid
 
@@ -65,6 +65,21 @@ resource "juju_application" "vault" {
 
   config = {
     auto-generate-root-ca-cert = true
+  }
+}
+
+resource "juju_integration" "rabbitmq-certificates" {
+  count      = local.rabbitmq && local.certificates_info != null ? 1 : 0
+  model_uuid = juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.rabbitmq[0].name
+    endpoint = "certificates"
+  }
+
+  application {
+    name     = local.certificates_info.name
+    endpoint = local.certificates_info.endpoint
   }
 }
 

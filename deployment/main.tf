@@ -1,21 +1,28 @@
-variable "glance" {
-  description = "Deploy Glance service"
-  type        = bool
+variable "keystone_vip" {
+  description = "Virtual IP for the Keystone service"
+  type        = string
   default     = false
   nullable    = false
 }
 
-variable "designate" {
-  description = "Deploy Designate service"
-  type        = bool
-  default     = false
+variable "glance_vip" {
+  description = "Virtual IP for the Glance service"
+  type        = string
+  default     = ""
   nullable    = false
 }
 
-variable "neutron" {
-  description = "Deploy Neutron service"
-  type        = bool
-  default     = false
+variable "designate_vip" {
+  description = "Virtual IP for the Designate service"
+  type        = string
+  default     = ""
+  nullable    = false
+}
+
+variable "neutron_vip" {
+  description = "Virtual IP for the Neutron service"
+  type        = string
+  default     = ""
   nullable    = false
 }
 
@@ -60,7 +67,9 @@ locals {
     jsondecode(data.external.local_upstream_dns.result.servers)
   )
   dns_domain   = "openstack.qa.1ss."
-  neutron      = var.neutron || var.designate
+  designate    = length(var.designate_vip) > 0
+  neutron      = length(var.neutron_vip) > 0 || local.designate
+  glance       = length(var.glance_vip) > 0
   rabbitmq     = local.neutron
   certificates = local.neutron
 }
@@ -73,27 +82,28 @@ locals {
 }
 
 module "keystone" {
-  source     = "../modules/keystone"
-  model_uuid = juju_model.openstack.uuid
-  mysql      = juju_application.mysql.name
-
+  source       = "../modules/keystone"
+  model_uuid   = juju_model.openstack.uuid
+  mysql        = juju_application.mysql.name
   certificates = local.certificates_info
+  vip          = var.keystone_vip
 }
 
 module "ceph" {
-  count      = var.glance ? 1 : 0
+  count      = local.glance ? 1 : 0
   source     = "../modules/ceph"
   model_uuid = juju_model.openstack.uuid
 }
 
 module "glance" {
-  count        = var.glance ? 1 : 0
+  count        = local.glance ? 1 : 0
   source       = "../modules/glance"
   model_uuid   = juju_model.openstack.uuid
   keystone     = module.keystone.app_name
   mysql        = juju_application.mysql.name
   ceph         = module.ceph[0].app_name
   certificates = local.certificates_info
+  vip          = var.glance_vip
 }
 
 module "neutron" {
@@ -103,16 +113,17 @@ module "neutron" {
   keystone   = module.keystone.app_name
   mysql      = juju_application.mysql.name
   rabbitmq   = juju_application.rabbitmq[0].name
-  neutron_api_options = var.designate ? {
+  neutron_api_options = local.designate ? {
     reverse-dns-lookup = true
   } : {}
   dns_domain   = local.dns_domain
   dns_servers  = local.dns_servers
   certificates = local.certificates_info
+  vip          = var.neutron_vip
 }
 
 module "designate" {
-  count        = var.designate ? 1 : 0
+  count        = local.designate ? 1 : 0
   source       = "../modules/designate"
   model_uuid   = juju_model.openstack.uuid
   keystone     = module.keystone.app_name
@@ -123,4 +134,5 @@ module "designate" {
   dns_domain   = local.dns_domain
   forwarders   = local.dns_servers
   certificates = local.certificates_info
+  vip          = var.designate_vip
 }

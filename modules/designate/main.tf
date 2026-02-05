@@ -38,6 +38,23 @@ resource "juju_application" "designate" {
     debug       = false
     verbose     = false
     nameservers = "ns1.${var.dns_domain}"
+    vip         = var.vip
+  }
+}
+
+resource "juju_application" "hacluster" {
+  name = "designate-hacluster"
+
+  model_uuid = data.juju_model.openstack.uuid
+
+  charm {
+    name    = "hacluster"
+    channel = "2.4/edge"
+    base    = "ubuntu@24.04"
+  }
+
+  config = {
+    cluster_count = 3
   }
 }
 
