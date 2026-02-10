@@ -66,14 +66,14 @@ def update_runner_times(task: dict[str, Any], times: int):
                 subtask["runner"]["times"] = times
 
     except KeyError as e:
-        raise RunLimitsError(f"invalid limits.json file: {e}")
+        raise RunLimitsError(f"invalid task file: {e}")
 
 
 def run_iterations(
     workdir: Path,
     options: RunOptions,
 ):
-    print(f"{options}")
+    print(f"Options: {options}")
 
     times = options.min_times
     iteration = 0
@@ -81,7 +81,7 @@ def run_iterations(
         iteration += 1
 
         if options.max_times and times > options.max_times:
-            print(f"Reached MAX_TIMES ({options.max_times}). Stopping.")
+            print(f"Reached {options.max_times} subtasks. Stopping.")
             return
 
         ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -104,8 +104,7 @@ def run_iterations(
 
         if rc == 2:
             print("\nRally task failed SLA requirements. Stopping iterations.")
-            print(f"Last run: runner.times={times}")
-            print(f"Taskfile: {taskfile}")
+            return
 
         if rc != 0:
             raise RunLimitsError("Rally command exited non-zero.")
@@ -175,9 +174,7 @@ def main() -> int:
     limits_file = script_dir / service_name / "limits.json"
 
     if not limits_file.exists():
-        raise RunLimitsError(
-            f"limits file not found for service '{service_name}': {limits_file}"
-        )
+        raise RunLimitsError(f"file {limits_file} not found")
 
     rally_bin = args.rally_bin
     if shutil.which(rally_bin) is None:
@@ -194,9 +191,9 @@ def main() -> int:
         with limits_file.open("r", encoding="utf-8") as f:
             limits = json.load(f)
     except FileNotFoundError:
-        raise RunLimitsError(f"limits file not found: {limits_file}")
+        raise RunLimitsError(f"file {limits_file} not found")
     except json.JSONDecodeError as exc:
-        raise RunLimitsError(f"failed to parse JSON from {limits_file}: {exc}")
+        raise RunLimitsError(f"failed to parse JSON file {limits_file}: {exc}")
 
     scenario = next(iter(limits.keys()))
 
