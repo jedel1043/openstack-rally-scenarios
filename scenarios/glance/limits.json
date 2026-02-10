@@ -1,0 +1,28 @@
+{
+  "GlanceImages.list_images": [
+    {
+      "runner": {
+        "type": "rps",
+        "times": 500,
+        "rps": 50
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 10
+        },
+        "images": {
+          "image_url": "http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img",
+          "disk_format": "qcow2",
+          "container_format": "bare",
+          "images_per_tenant": 4
+        }
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 0
+        }
+      }
+    }
+  ]
+}

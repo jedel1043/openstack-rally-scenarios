@@ -1,0 +1,22 @@
+{
+  "Authenticate.keystone": [
+    {
+      "runner": {
+        "type": "rps",
+        "times": 500,
+        "rps": 50
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 50
+        }
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 0
+        }
+      }
+    }
+  ]
+}
