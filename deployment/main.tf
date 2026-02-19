@@ -38,6 +38,13 @@ variable "upstream_dns_servers" {
   }
 }
 
+variable "use_lxd" {
+  description = "Use LXD containers to emplace the services"
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
 terraform {
   required_providers {
     juju = {
@@ -87,6 +94,7 @@ module "keystone" {
   mysql        = juju_application.mysql.name
   certificates = local.certificates_info
   vip          = var.keystone_vip
+  placement    = [for machine in juju_machine.os-machines : "lxd:${machine.machine_id}"]
 }
 
 module "ceph" {
@@ -104,6 +112,7 @@ module "glance" {
   ceph         = module.ceph[0].app_name
   certificates = local.certificates_info
   vip          = var.glance_vip
+  placement    = [for machine in juju_machine.os-machines : "lxd:${machine.machine_id}"]
 }
 
 module "neutron" {
@@ -120,6 +129,7 @@ module "neutron" {
   dns_servers  = local.dns_servers
   certificates = local.certificates_info
   vip          = var.neutron_vip
+  placement    = [for machine in juju_machine.os-machines : "lxd:${machine.machine_id}"]
 }
 
 module "designate" {
@@ -135,4 +145,5 @@ module "designate" {
   forwarders   = local.dns_servers
   certificates = local.certificates_info
   vip          = var.designate_vip
+  placement    = [for machine in juju_machine.os-machines : "lxd:${machine.machine_id}"]
 }

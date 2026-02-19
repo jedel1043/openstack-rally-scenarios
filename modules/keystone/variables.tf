@@ -4,30 +4,8 @@ variable "model_uuid" {
   nullable    = false
 }
 
-variable "vip" {
-  description = "Virtual IP to use to front the Glance API service."
-  type        = string
-  nullable    = false
-  validation {
-    condition     = var.vip != ""
-    error_message = "Virtual IP must not be empty."
-  }
-}
-
 variable "mysql" {
   description = "Name of the MySQL application"
-  type        = string
-  nullable    = false
-}
-
-variable "keystone" {
-  description = "Name of the Keystone application"
-  type        = string
-  nullable    = false
-}
-
-variable "ceph" {
-  description = "Name of the Ceph application for Ceph clients"
   type        = string
   nullable    = false
 }
@@ -49,6 +27,16 @@ variable "certificates" {
       )
     )
     error_message = "Name and endpoint for the certificates application must not be empty."
+  }
+}
+
+variable "vip" {
+  description = "Virtual IP to use to front the Keystone service."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = var.vip != ""
+    error_message = "Virtual IP must not be empty."
   }
 }
 

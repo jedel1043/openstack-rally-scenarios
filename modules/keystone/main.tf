@@ -7,48 +7,6 @@ terraform {
   }
 }
 
-variable "model_uuid" {
-  description = "Model UUID where all applications will be deployed"
-  type        = string
-  nullable    = false
-}
-
-variable "mysql" {
-  description = "Name of the MySQL application"
-  type        = string
-  nullable    = false
-}
-
-variable "certificates" {
-  description = "Name and endpoint of the SSL certificates application"
-  type = object({
-    name     = string
-    endpoint = string
-  })
-  nullable = true
-  default  = null
-
-  validation {
-    condition = (
-      var.certificates == null || (
-        length(trimspace(var.certificates.name)) > 0 &&
-        length(trimspace(var.certificates.endpoint)) > 0
-      )
-    )
-    error_message = "Name and endpoint for the certificates application must not be empty."
-  }
-}
-
-variable "vip" {
-  description = "Virtual IP to use to front the Keystone service."
-  type        = string
-  nullable    = false
-  validation {
-    condition     = var.vip != ""
-    error_message = "Virtual IP must not be empty."
-  }
-}
-
 data "juju_model" "openstack" {
   uuid = var.model_uuid
 }
@@ -76,6 +34,22 @@ resource "juju_application" "mysql-router" {
   }
 }
 
+resource "juju_machine" "keystone" {
+  count       = 3
+  model_uuid  = data.juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "keystone-m${count.index}"
+  constraints = "mem=4G"
+
+  placement = try(var.placement[count.index], null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "juju_application" "keystone" {
   name = "keystone"
 
@@ -87,9 +61,7 @@ resource "juju_application" "keystone" {
     base    = "ubuntu@24.04"
   }
 
-  units = 3
-
-  constraints = "mem=4G"
+  machines = toset(juju_machine.keystone[*].machine_id)
 
   config = {
     debug            = false

@@ -19,6 +19,22 @@ resource "juju_application" "mysql-router" {
   }
 }
 
+resource "juju_machine" "designate" {
+  count       = 3
+  model_uuid  = data.juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "designate-m${count.index}"
+  constraints = "mem=1G"
+
+  placement = try(var.placement[count.index], null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "juju_application" "designate" {
   name = "designate"
 
@@ -30,9 +46,7 @@ resource "juju_application" "designate" {
     base    = "ubuntu@24.04"
   }
 
-  units = 3
-
-  constraints = "mem=1G"
+  machines = toset(juju_machine.designate[*].machine_id)
 
   config = {
     debug       = false
@@ -58,6 +72,22 @@ resource "juju_application" "hacluster" {
   }
 }
 
+resource "juju_machine" "designate-bind" {
+  count       = 2
+  model_uuid  = data.juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "designate-bind-m${count.index}"
+  constraints = "mem=1G"
+
+  placement = try(var.placement[count.index], null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "juju_application" "designate-bind" {
   name = "designate-bind"
 
@@ -69,9 +99,8 @@ resource "juju_application" "designate-bind" {
     base    = "ubuntu@24.04"
   }
 
-  units = 2
 
-  constraints = "mem=1G"
+  machines = toset(juju_machine.designate-bind[*].machine_id)
 
   config = {
     forwarders = join(";", var.forwarders)

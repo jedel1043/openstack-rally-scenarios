@@ -7,6 +7,22 @@ terraform {
   }
 }
 
+resource "juju_machine" "glance" {
+  count       = 3
+  model_uuid  = data.juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "glance-m${count.index}"
+  constraints = "mem=1G"
+
+  placement = try(var.placement[count.index], null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "juju_application" "glance" {
   name = "glance"
 
@@ -18,9 +34,7 @@ resource "juju_application" "glance" {
     base    = "ubuntu@24.04"
   }
 
-  units = 3
-
-  constraints = "mem=1G"
+  machines = toset(juju_machine.glance[*].machine_id)
 
   config = {
     debug            = false

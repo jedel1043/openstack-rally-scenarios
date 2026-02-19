@@ -19,6 +19,22 @@ resource "juju_application" "mysql-router" {
   }
 }
 
+resource "juju_machine" "neutron-api" {
+  count       = 3
+  model_uuid  = data.juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "neutron-api-m${count.index}"
+  constraints = "mem=2G"
+
+  placement = try(var.placement[count.index], null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "juju_application" "neutron-api" {
   name = "neutron-api"
 
@@ -30,9 +46,7 @@ resource "juju_application" "neutron-api" {
     base    = "ubuntu@24.04"
   }
 
-  units = 3
-
-  constraints = "mem=2G"
+  machines = toset(juju_machine.neutron-api[*].machine_id)
 
   config = merge(
     {
@@ -85,13 +99,28 @@ resource "juju_application" "neutron-ovn" {
   }
 }
 
+resource "juju_machine" "ovn-central" {
+  count       = 3
+  model_uuid  = data.juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "ovn-central-m${count.index}"
+  constraints = "mem=2G"
+
+  placement = try(var.placement[count.index], null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "juju_application" "ovn-central" {
   name = "ovn-central"
 
   model_uuid = data.juju_model.openstack.uuid
 
-  units       = 3
-  constraints = "mem=2G"
+  machines = toset(juju_machine.ovn-central[*].machine_id)
 
   charm {
     name    = "ovn-central"

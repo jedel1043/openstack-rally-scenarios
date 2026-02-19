@@ -67,3 +67,10 @@ variable "dns_servers" {
     error_message = "Must specify at least one DNS server."
   }
 }
+
+variable "placement" {
+  description = "Information about how to allocate the service's machines in the cloud."
+  type        = list(string)
+  nullable    = false
+  default     = []
+}

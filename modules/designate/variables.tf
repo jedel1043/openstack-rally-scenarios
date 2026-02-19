@@ -72,11 +72,18 @@ variable "dns_domain" {
 }
 
 variable "forwarders" {
-  description = "Designate BIND upstream DNS servers to forward requests to"
+  description = "Designate BIND upstream DNS servers to forward requests to."
   type        = list(string)
   nullable    = false
   validation {
     condition     = length(var.forwarders) > 0
     error_message = "Must specify at least one DNS server."
   }
+}
+
+variable "placement" {
+  description = "Information about how to allocate the service's machines in the cloud."
+  type        = list(string)
+  nullable    = false
+  default     = []
 }

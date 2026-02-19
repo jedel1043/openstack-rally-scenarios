@@ -2,6 +2,37 @@ resource "juju_model" "openstack" {
   name = "openstack"
 }
 
+resource "juju_machine" "os-machines" {
+  count = var.use_lxd ? 3 : 0
+
+  model_uuid  = juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "os-machine-${count.index}"
+  constraints = "mem=16G"
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "juju_machine" "mysql" {
+  count       = 3
+  model_uuid  = juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "mysql-m${count.index}"
+  constraints = "mem=4G"
+
+  placement = try("lxd:${juju_machine.os-machines[count.index]}", null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "juju_application" "mysql" {
   name       = "mysql"
   model_uuid = juju_model.openstack.uuid
@@ -11,12 +42,29 @@ resource "juju_application" "mysql" {
     channel = "latest/edge"
     base    = "ubuntu@24.04"
   }
-  units       = 3
-  constraints = "mem=4G"
+
+  machines = toset(juju_machine.mysql[*].machine_id)
+
   config = {
     innodb-buffer-pool-size = "50%"
     max-connections         = 20000
     tuning-level            = "fast"
+  }
+}
+
+resource "juju_machine" "rabbitmq" {
+  count       = 3
+  model_uuid  = juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "rabbitmq-m${count.index}"
+  constraints = "mem=1G"
+
+  placement = try("lxd:${juju_machine.os-machines[count.index]}", null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -30,10 +78,27 @@ resource "juju_application" "rabbitmq" {
     channel = "latest/edge"
     base    = "ubuntu@24.04"
   }
-  units       = 3
-  constraints = "mem=1G"
+
+  machines = toset(juju_machine.rabbitmq[*].machine_id)
+
   config = {
     min-cluster-size = 1
+  }
+}
+
+resource "juju_machine" "memcached" {
+  count       = 2
+  model_uuid  = juju_model.openstack.uuid
+  base        = "ubuntu@24.04"
+  name        = "memcached-m${count.index}"
+  constraints = "mem=2G"
+
+  placement = try("lxd:${juju_machine.os-machines[count.index]}", null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -47,8 +112,23 @@ resource "juju_application" "memcached" {
     channel = "latest/stable"
     base    = "ubuntu@22.04"
   }
-  units       = 2
-  constraints = "mem=2G"
+
+  machines = toset(juju_machine.memcached[*].machine_id)
+}
+
+resource "juju_machine" "vault" {
+  count      = 1
+  model_uuid = juju_model.openstack.uuid
+  base       = "ubuntu@24.04"
+  name       = "vault-m${count.index}"
+
+  placement = try("lxd:${juju_machine.os-machines[count.index]}", null)
+
+  // Ensures Terraform removes units first before destroying
+  // machines, which avoids timeouts.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "juju_application" "vault" {
@@ -61,7 +141,8 @@ resource "juju_application" "vault" {
     channel = "latest/edge"
     base    = "ubuntu@24.04"
   }
-  units = 1
+
+  machines = toset(juju_machine.vault[*].machine_id)
 
   config = {
     auto-generate-root-ca-cert = true
