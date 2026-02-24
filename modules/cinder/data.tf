@@ -24,7 +24,12 @@ data "juju_application" "ceph" {
 }
 
 data "juju_application" "rabbitmq" {
-  count      = var.rabbitmq != null ? 1 : 0
   name       = var.rabbitmq
+  model_uuid = data.juju_model.openstack.uuid
+}
+
+data "juju_application" "glance" {
+  count      = var.glance != null ? 1 : 0
+  name       = var.glance
   model_uuid = data.juju_model.openstack.uuid
 }

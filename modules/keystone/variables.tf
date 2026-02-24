@@ -18,16 +18,6 @@ variable "certificates" {
   })
   nullable = true
   default  = null
-
-  validation {
-    condition = (
-      var.certificates == null || (
-        length(trimspace(var.certificates.name)) > 0 &&
-        length(trimspace(var.certificates.endpoint)) > 0
-      )
-    )
-    error_message = "Name and endpoint for the certificates application must not be empty."
-  }
 }
 
 variable "vip" {
@@ -40,8 +30,8 @@ variable "vip" {
   }
 }
 
-variable "placement" {
-  description = "Information about how to allocate the service's machines in the cloud."
+variable "unit_placement" {
+  description = "Information about where to place the service's units in the cloud."
   type        = list(string)
   nullable    = false
   default     = []

@@ -7,11 +7,11 @@ terraform {
   }
 }
 
-resource "juju_machine" "glance" {
+resource "juju_machine" "placement" {
   count       = 3
   model_uuid  = data.juju_model.openstack.uuid
   base        = "ubuntu@24.04"
-  name        = "glance-m${count.index}"
+  name        = "placement-m${count.index}"
   constraints = "mem=1G"
 
   placement = try(var.unit_placement[count.index], null)
@@ -23,29 +23,28 @@ resource "juju_machine" "glance" {
   }
 }
 
-resource "juju_application" "glance" {
-  name = "glance"
+resource "juju_application" "placement" {
+  name = "placement"
 
   model_uuid = data.juju_model.openstack.uuid
 
   charm {
-    name    = "glance"
+    name    = "placement"
     channel = "latest/edge"
     base    = "ubuntu@24.04"
   }
 
-  machines = toset(juju_machine.glance[*].machine_id)
+  machines = toset(juju_machine.placement[*].machine_id)
 
   config = {
     debug            = false
-    verbose          = false
     openstack-origin = "distro"
     vip              = var.vip
   }
 }
 
 resource "juju_application" "hacluster" {
-  name = "glance-hacluster"
+  name = "placement-hacluster"
 
   model_uuid = data.juju_model.openstack.uuid
 
@@ -61,7 +60,7 @@ resource "juju_application" "hacluster" {
 }
 
 resource "juju_application" "mysql-router" {
-  name = "glance-mysql-router"
+  name = "placement-mysql-router"
 
   model_uuid = data.juju_model.openstack.uuid
 
@@ -73,6 +72,6 @@ resource "juju_application" "mysql-router" {
 }
 
 output "app_name" {
-  description = "Name of the Glance application"
-  value       = juju_application.glance.name
+  description = "Name of the placement application"
+  value       = juju_application.placement.name
 }

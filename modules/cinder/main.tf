@@ -7,11 +7,11 @@ terraform {
   }
 }
 
-resource "juju_machine" "glance" {
+resource "juju_machine" "cinder" {
   count       = 3
   model_uuid  = data.juju_model.openstack.uuid
   base        = "ubuntu@24.04"
-  name        = "glance-m${count.index}"
+  name        = "cinder-m${count.index}"
   constraints = "mem=1G"
 
   placement = try(var.unit_placement[count.index], null)
@@ -23,29 +23,31 @@ resource "juju_machine" "glance" {
   }
 }
 
-resource "juju_application" "glance" {
-  name = "glance"
+resource "juju_application" "cinder" {
+  name = "cinder"
 
   model_uuid = data.juju_model.openstack.uuid
 
   charm {
-    name    = "glance"
+    name    = "cinder"
     channel = "latest/edge"
     base    = "ubuntu@24.04"
   }
 
-  machines = toset(juju_machine.glance[*].machine_id)
+  machines = toset(juju_machine.cinder[*].machine_id)
 
   config = {
-    debug            = false
-    verbose          = false
-    openstack-origin = "distro"
-    vip              = var.vip
+    debug              = false
+    verbose            = false
+    openstack-origin   = "distro"
+    vip                = var.vip
+    overwrite          = false
+    glance-api-version = 2
   }
 }
 
 resource "juju_application" "hacluster" {
-  name = "glance-hacluster"
+  name = "cinder-hacluster"
 
   model_uuid = data.juju_model.openstack.uuid
 
@@ -61,7 +63,7 @@ resource "juju_application" "hacluster" {
 }
 
 resource "juju_application" "mysql-router" {
-  name = "glance-mysql-router"
+  name = "cinder-mysql-router"
 
   model_uuid = data.juju_model.openstack.uuid
 
@@ -72,7 +74,24 @@ resource "juju_application" "mysql-router" {
   }
 }
 
-output "app_name" {
-  description = "Name of the Glance application"
-  value       = juju_application.glance.name
+resource "juju_application" "cinder-ceph" {
+  name = "cinder-ceph"
+
+  model_uuid = data.juju_model.openstack.uuid
+
+  charm {
+    name    = "cinder-ceph"
+    channel = "latest/edge"
+    base    = "ubuntu@24.04"
+  }
+}
+
+output "cinder" {
+  description = "Name of the Cinder application"
+  value       = juju_application.cinder.name
+}
+
+output "cinder-ceph" {
+  description = "Name of the Cinder Ceph application"
+  value       = juju_application.cinder-ceph.name
 }

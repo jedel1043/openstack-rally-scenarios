@@ -41,7 +41,7 @@ resource "juju_machine" "keystone" {
   name        = "keystone-m${count.index}"
   constraints = "mem=4G"
 
-  placement = try(var.placement[count.index], null)
+  placement = try(var.unit_placement[count.index], null)
 
   // Ensures Terraform removes units first before destroying
   // machines, which avoids timeouts.

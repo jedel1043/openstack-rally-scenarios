@@ -65,6 +65,7 @@ resource "juju_application" "ceph-osd" {
     })
   }
 
+  # TODO: make this cloud generic
   storage_directives = {
     osd-devices = "cinder,1,10G"
   }

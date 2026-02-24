@@ -1,22 +1,8 @@
-resource "juju_integration" "ceph" {
-  model_uuid = data.juju_model.openstack.uuid
-
-  application {
-    name     = juju_application.glance.name
-    endpoint = "ceph"
-  }
-
-  application {
-    name     = data.juju_application.ceph.name
-    endpoint = "client"
-  }
-}
-
 resource "juju_integration" "identity-service" {
   model_uuid = data.juju_model.openstack.uuid
 
   application {
-    name     = juju_application.glance.name
+    name     = juju_application.placement.name
     endpoint = "identity-service"
   }
 
@@ -44,7 +30,7 @@ resource "juju_integration" "shared-db" {
   model_uuid = data.juju_model.openstack.uuid
 
   application {
-    name     = juju_application.glance.name
+    name     = juju_application.placement.name
     endpoint = "shared-db"
   }
 
@@ -59,7 +45,7 @@ resource "juju_integration" "certificates" {
   model_uuid = data.juju_model.openstack.uuid
 
   application {
-    name     = juju_application.glance.name
+    name     = juju_application.placement.name
     endpoint = "certificates"
   }
 
@@ -73,27 +59,12 @@ resource "juju_integration" "ha" {
   model_uuid = data.juju_model.openstack.uuid
 
   application {
-    name     = juju_application.glance.name
+    name     = juju_application.placement.name
     endpoint = "ha"
   }
 
   application {
     name     = juju_application.hacluster.name
     endpoint = "ha"
-  }
-}
-
-resource "juju_integration" "amqp" {
-  count      = length(data.juju_application.rabbitmq)
-  model_uuid = data.juju_model.openstack.uuid
-
-  application {
-    name     = juju_application.glance.name
-    endpoint = "amqp"
-  }
-
-  application {
-    name     = data.juju_application.rabbitmq[0].name
-    endpoint = "amqp"
   }
 }

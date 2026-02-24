@@ -26,19 +26,6 @@ variable "keystone" {
   nullable    = false
 }
 
-variable "ceph" {
-  description = "Name of the Ceph application for Ceph clients"
-  type        = string
-  nullable    = false
-}
-
-variable "rabbitmq" {
-  description = "Name of the RabbitMQ application"
-  type        = string
-  nullable    = true
-  default     = null
-}
-
 variable "certificates" {
   description = "Name and endpoint of the SSL certificates application"
   type = object({

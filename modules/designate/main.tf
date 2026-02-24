@@ -26,7 +26,7 @@ resource "juju_machine" "designate" {
   name        = "designate-m${count.index}"
   constraints = "mem=1G"
 
-  placement = try(var.placement[count.index], null)
+  placement = try(var.unit_placement[count.index], null)
 
   // Ensures Terraform removes units first before destroying
   // machines, which avoids timeouts.
@@ -79,7 +79,7 @@ resource "juju_machine" "designate-bind" {
   name        = "designate-bind-m${count.index}"
   constraints = "mem=1G"
 
-  placement = try(var.placement[count.index], null)
+  placement = try(var.unit_placement[count.index], null)
 
   // Ensures Terraform removes units first before destroying
   // machines, which avoids timeouts.

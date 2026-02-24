@@ -68,8 +68,8 @@ variable "dns_servers" {
   }
 }
 
-variable "placement" {
-  description = "Information about how to allocate the service's machines in the cloud."
+variable "unit_placement" {
+  description = "Information about where to place the service's units in the cloud."
   type        = list(string)
   nullable    = false
   default     = []

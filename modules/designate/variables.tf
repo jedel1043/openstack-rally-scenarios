@@ -51,14 +51,6 @@ variable "certificates" {
     endpoint = string
   })
   nullable = false
-
-  validation {
-    condition = (
-      length(trimspace(var.certificates.name)) > 0 &&
-      length(trimspace(var.certificates.endpoint)) > 0
-    )
-    error_message = "Name and endpoint for the certificates application must not be empty."
-  }
 }
 
 variable "dns_domain" {
@@ -81,8 +73,8 @@ variable "forwarders" {
   }
 }
 
-variable "placement" {
-  description = "Information about how to allocate the service's machines in the cloud."
+variable "unit_placement" {
+  description = "Information about where to place the service's units in the cloud."
   type        = list(string)
   nullable    = false
   default     = []

@@ -53,7 +53,7 @@ resource "juju_application" "mysql" {
 }
 
 resource "juju_machine" "rabbitmq" {
-  count       = 3
+  count       = local.rabbitmq ? 3 : 0
   model_uuid  = juju_model.openstack.uuid
   base        = "ubuntu@24.04"
   name        = "rabbitmq-m${count.index}"
@@ -87,9 +87,9 @@ resource "juju_application" "rabbitmq" {
 }
 
 resource "juju_machine" "memcached" {
-  count       = 2
+  count       = local.memcached ? 2 : 0
   model_uuid  = juju_model.openstack.uuid
-  base        = "ubuntu@24.04"
+  base        = "ubuntu@22.04"
   name        = "memcached-m${count.index}"
   constraints = "mem=2G"
 
@@ -103,7 +103,7 @@ resource "juju_machine" "memcached" {
 }
 
 resource "juju_application" "memcached" {
-  count      = local.designate ? 1 : 0
+  count      = local.memcached ? 1 : 0
   name       = "memcached"
   model_uuid = juju_model.openstack.uuid
 
@@ -117,7 +117,7 @@ resource "juju_application" "memcached" {
 }
 
 resource "juju_machine" "vault" {
-  count      = 1
+  count      = local.certificates ? 1 : 0
   model_uuid = juju_model.openstack.uuid
   base       = "ubuntu@24.04"
   name       = "vault-m${count.index}"

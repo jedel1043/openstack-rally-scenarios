@@ -35,6 +35,12 @@ variable "ceph" {
 variable "rabbitmq" {
   description = "Name of the RabbitMQ application"
   type        = string
+  nullable    = false
+}
+
+variable "glance" {
+  description = "Name of the Glance application"
+  type        = string
   nullable    = true
   default     = null
 }

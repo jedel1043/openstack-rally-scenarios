@@ -26,7 +26,7 @@ resource "juju_machine" "neutron-api" {
   name        = "neutron-api-m${count.index}"
   constraints = "mem=2G"
 
-  placement = try(var.placement[count.index], null)
+  placement = try(var.unit_placement[count.index], null)
 
   // Ensures Terraform removes units first before destroying
   // machines, which avoids timeouts.
@@ -106,7 +106,7 @@ resource "juju_machine" "ovn-central" {
   name        = "ovn-central-m${count.index}"
   constraints = "mem=2G"
 
-  placement = try(var.placement[count.index], null)
+  placement = try(var.unit_placement[count.index], null)
 
   // Ensures Terraform removes units first before destroying
   // machines, which avoids timeouts.
@@ -152,7 +152,12 @@ resource "juju_application" "ovn-central" {
 #   }
 # }
 
-output "app_name" {
+output "neutron-api" {
   description = "Name of the Neutron API application"
   value       = juju_application.neutron-api.name
+}
+
+output "ovn-central" {
+  description = "Name of the OVN Central application"
+  value       = juju_application.ovn-central.name
 }
