@@ -211,7 +211,7 @@ resource "juju_integration" "placement" {
 }
 
 resource "juju_integration" "neutron-api" {
-  count      = length(data.juju_application.neutron_api)
+  count      = length(data.juju_application.neutron-api)
   model_uuid = data.juju_model.openstack.uuid
 
   application {
@@ -220,8 +220,52 @@ resource "juju_integration" "neutron-api" {
   }
 
   application {
-    name     = data.juju_application.neutron_api[0].name
+    name     = data.juju_application.neutron-api[0].name
     endpoint = "neutron-api"
   }
 }
 
+resource "juju_integration" "neutron-plugin" {
+  count      = length(juju_application.ovn-chassis)
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.nova-compute.name
+    endpoint = "neutron-plugin"
+  }
+
+  application {
+    name     = juju_application.ovn-chassis[0].name
+    endpoint = "nova-compute"
+  }
+}
+
+resource "juju_integration" "ovsdb" {
+  count      = length(data.juju_application.ovn-central)
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = data.juju_application.ovn-central[0].name
+    endpoint = "ovsdb"
+  }
+
+  application {
+    name     = juju_application.ovn-chassis[0].name
+    endpoint = "ovsdb"
+  }
+}
+
+resource "juju_integration" "ovn-chassis-certificates" {
+  count      = length(juju_application.ovn-chassis)
+  model_uuid = data.juju_model.openstack.uuid
+
+  application {
+    name     = juju_application.ovn-chassis[0].name
+    endpoint = "certificates"
+  }
+
+  application {
+    name     = data.juju_application.certificates[0].name
+    endpoint = var.certificates.endpoint
+  }
+}

@@ -137,18 +137,3 @@ resource "juju_integration" "ha" {
     endpoint = "ha"
   }
 }
-
-# Move into nova-compute when testing it
-# resource "juju_integration" "ovsdb" {
-#   model_uuid = data.juju_model.openstack.uuid
-
-#   application {
-#     name     = juju_application.ovn-chassis.name
-#     endpoint = "ovsdb"
-#   }
-
-#   application {
-#     name     = juju_application.ovn-central.name
-#     endpoint = "ovsdb"
-#   }
-# }

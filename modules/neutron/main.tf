@@ -133,25 +133,6 @@ resource "juju_application" "ovn-central" {
   }
 }
 
-# Move into nova-compute when testing it
-# resource "juju_application" "ovn-chassis" {
-#   name = "ovn-chassis"
-
-#   model_uuid = data.juju_model.openstack.uuid
-
-#   charm {
-#     name    = "ovn-chassis"
-#     channel = "latest/edge"
-#     base    = "ubuntu@24.04"
-#   }
-
-#   config = {
-#     debug                     = false
-#     ovn-bridge-mappings       = "physnet1:br-data"
-#     prefer-chassis-as-gw      = true
-#   }
-# }
-
 output "neutron-api" {
   description = "Name of the Neutron API application"
   value       = juju_application.neutron-api.name

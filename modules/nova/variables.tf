@@ -80,6 +80,11 @@ variable "ovn_central" {
   type        = string
   nullable    = true
   default     = null
+
+  validation {
+    condition     = var.ovn_central == null || var.certificates != null
+    error_message = "Ovn central can only be used if there is an available SSL certificates application"
+  }
 }
 
 variable "certificates" {

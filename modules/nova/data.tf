@@ -47,13 +47,13 @@ data "juju_application" "ceph" {
   model_uuid = data.juju_model.openstack.uuid
 }
 
-data "juju_application" "neutron_api" {
+data "juju_application" "neutron-api" {
   count      = var.neutron_api != null ? 1 : 0
   name       = var.neutron_api
   model_uuid = data.juju_model.openstack.uuid
 }
 
-data "juju_application" "ovn_central" {
+data "juju_application" "ovn-central" {
   count      = var.ovn_central != null ? 1 : 0
   name       = var.ovn_central
   model_uuid = data.juju_model.openstack.uuid

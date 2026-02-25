@@ -41,7 +41,7 @@ resource "juju_application" "nova-cloud-controller" {
     verbose          = false
     openstack-origin = "distro"
     vip              = var.vip
-    network-manager  = length(data.juju_application.neutron_api) > 0 ? "Neutron" : null
+    network-manager  = length(data.juju_application.neutron-api) > 0 ? "Neutron" : null
   }
 }
 
@@ -86,7 +86,7 @@ resource "juju_application" "nova-compute" {
 
   units = 1
 
-  constraints = "mem=4G cores=2"
+  constraints = "mem=8G cores=4"
 
   config = {
     debug                 = false
@@ -102,5 +102,24 @@ resource "juju_application" "nova-compute" {
   # TODO: make this cloud generic
   storage_directives = {
     ephemeral-device = "cinder,50G,1"
+  }
+}
+
+resource "juju_application" "ovn-chassis" {
+  count = length(data.juju_application.ovn-central)
+  name  = "ovn-chassis"
+
+  model_uuid = data.juju_model.openstack.uuid
+
+  charm {
+    name    = "ovn-chassis"
+    channel = "latest/edge"
+    base    = "ubuntu@24.04"
+  }
+
+  config = {
+    debug                = false
+    ovn-bridge-mappings  = "physnet1:br-data"
+    prefer-chassis-as-gw = true
   }
 }

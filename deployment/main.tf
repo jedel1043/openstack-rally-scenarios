@@ -53,9 +53,10 @@ variable "nova_vip" {
     condition = var.nova_vip == "" || (
       var.glance_vip != "" &&
       var.placement_vip != "" &&
-      var.cinder_vip != ""
+      var.cinder_vip != "" &&
+      var.neutron_vip != ""
     )
-    error_message = "Nova service requires enabling the Glance, Placement and Cinder services."
+    error_message = "Nova service requires enabling the Glance, Placement, Cinder and Neutron services."
   }
 }
 
