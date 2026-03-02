@@ -1,0 +1,26 @@
+{
+  "NovaServers.boot_and_delete_server": [
+    {
+      "runner": {
+        "type": "constant",
+        "times": 10,
+        "concurrency": 2
+      },
+      "args": {
+        "flavor": {
+          "name": "m1.tiny"
+        },
+        "image": {
+          "regex": "^.*cirros.*$"
+        },
+        "force_delete": true
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 2
+        }
+      }
+    }
+  ]
+}
