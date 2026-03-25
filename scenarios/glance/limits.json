@@ -1,11 +1,21 @@
 {
-  "GlanceImages.list_images": [
+  "OsStress.find_limits": [
     {
-      "runner": {
-        "type": "rps",
-        "times": 500,
-        "rps": 50
+      "args": {
+        "scenario_name": "GlanceImages.list_images",
+        "min_times": 5,
+        "max_times": 50,
+        "step": 5,
+        "runner": {
+          "type": "rps",
+          "times": 500,
+          "rps": 50
+        },
+        "sla": {
+          "failure_rate": { "max": 0 }
+        }
       },
+      "runner": { "type": "serial", "times": 1 },
       "context": {
         "users": {
           "tenants": 3,
@@ -16,11 +26,6 @@
           "disk_format": "qcow2",
           "container_format": "bare",
           "images_per_tenant": 4
-        }
-      },
-      "sla": {
-        "failure_rate": {
-          "max": 0
         }
       }
     }

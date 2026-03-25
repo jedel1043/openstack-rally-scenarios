@@ -1,0 +1,55 @@
+{
+  "OsStress.split_run": [
+    {
+      "args": {
+        "scenario_name": "GlanceImages.list_images",
+        "scenario_args": {},
+        "runner": {
+          "type": "rps",
+          "times": 40,
+          "rps": 50,
+          "max_concurrency": 10
+        },
+        "hosts": [
+          {
+            "label": "glance-0",
+            "reach_command": "juju ssh -m openstack --container glance-api glance/0",
+            "trigger_command": "sh -c 'openssl speed -multi $(nproc) aes-256-cbc'"
+          },
+          {
+            "label": "glance-1",
+            "reach_command": "juju ssh -m openstack --container glance-api glance/1"
+          },
+          {
+            "label": "glance-2",
+            "reach_command": "juju ssh -m openstack --container glance-api glance/2"
+          }
+        ],
+        "connect_timeout": 10,
+        "trigger_wait": 0
+      },
+      "runner": {
+        "type": "constant",
+        "times": 1,
+        "concurrency": 1
+      },
+      "context": {
+        "users": {
+          "tenants": 3,
+          "users_per_tenant": 10
+        },
+        "images": {
+          "image_url": "http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img",
+          "disk_format": "qcow2",
+          "container_format": "bare",
+          "images_per_tenant": 4
+        }
+      },
+      "sla": {
+        "failure_rate": {
+          "max": 50
+        }
+      }
+    }
+  ]
+}
