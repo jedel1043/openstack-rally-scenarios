@@ -3,7 +3,7 @@
 This package provides Rally scenario plugins that extend standard
 Rally-OpenStack scenarios:
 
-* **OsStress.split_run** (``plugins/split_run``) — split-run
+* **OsStress.split_stress** (``plugins/split_stress``) — split-run
   execution with host-level metrics.  Run half of the planned iterations,
   fire a trigger command on one or more target hosts, then run the
   remaining iterations.  Multi-host / HA support with per-host triggers
@@ -34,7 +34,7 @@ Package layout
     ├── metrics.py       ← host metrics collection and chart building
     └── plugins/
         ├── __init__.py
-        ├── split_run.py    ← OsStress.split_run
+        ├── split_stress.py   ← OsStress.split_stress
         └── find_limits.py    ← OsStress.find_limits
 
 Usage

@@ -50,11 +50,7 @@ def run_via_runner(
     task: Any,
     context: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Execute a scenario through a real Rally runner.
-
-    A shallow copy of *runner_cfg* is made and ``"times"`` is injected
-    (or overridden) with *times*.  A fresh runner instance is created,
-    used for the run, and then discarded.
+    """Execute a scenario through a Rally runner.
 
     Returns the flat list of :class:`ScenarioRunnerResult` dicts
     produced by the runner.

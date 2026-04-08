@@ -1,14 +1,14 @@
 {
-  "OsStress.split_run": [
+  "OsStress.split_stress": [
     {
       "args": {
         "scenario_name": "GlanceImages.list_images",
         "scenario_args": {},
         "runner": {
           "type": "rps",
-          "times": 40,
+          "times": 200,
           "rps": 50,
-          "max_concurrency": 10
+          "max_concurrency": 20
         },
         "hosts": [
           {

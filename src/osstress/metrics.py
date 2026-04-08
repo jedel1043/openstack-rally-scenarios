@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import queue
 import shlex
 import subprocess
+import threading
 import time
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -20,52 +23,34 @@ _CMD_MEMORY = "cat /proc/meminfo"
 _CMD_IO = "cat /proc/diskstats"
 
 
-def build_ssh_reach_command(
-    host,  # type: str
-    username="ubuntu",  # type: str
-    port=22,  # type: int
-    key_file=None,  # type: Optional[str]
-    connect_timeout=10,  # type: int
-):
-    # type: (...) -> List[str]
-    """Build an SSH *reach_command* prefix from traditional SSH parameters.
-
-    The returned list can be passed as the *reach_command* argument to
-    :class:`HostConnection`.  When combined with a remote command string
-    it produces a complete ``ssh`` invocation::
-
-        reach = build_ssh_reach_command("10.0.0.1")
-        subprocess.run(reach + ["cat /etc/hostname"])
-    """
-    cmd = [
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=%d" % connect_timeout,
-        "-p",
-        str(port),
-    ]
-    if key_file:
-        cmd += ["-i", key_file]
-    cmd.append("%s@%s" % (username, host))
-    return cmd
-
-
 def _exec_remote(
-    conn,  # type: HostConnection
-    remote_cmd,  # type: str
-):
-    # type: (...) -> str
+    conn: HostConnection,
+    remote_cmd: str,
+) -> str:
     """Execute *remote_cmd* on the host described by *conn* and return stdout.
 
-    The full command executed locally is ``conn.reach_command + [remote_cmd]``.
-    This works for any transport — SSH, ``juju ssh``, ``kubectl exec``, etc.
+    If *conn* has a live :class:`PersistentShell` attached, the command
+    is sent through the existing connection, avoiding the overhead of
+    spawning a new process and establishing a new remote session.
+
+    Otherwise the full command executed locally is
+    ``conn.reach_command + [remote_cmd]``.  This works for any transport
+    — SSH, ``juju ssh``, ``kubectl exec``, etc.
     """
+    shell = getattr(conn, "shell", None)
+    if shell is not None and shell.is_alive:
+        _logger.debug(
+            "Remote exec on %s (persistent): %s", conn.label, remote_cmd,
+        )
+        try:
+            return shell.exec_command(remote_cmd, timeout=conn.command_timeout)
+        except Exception:
+            _logger.warning(
+                "Persistent shell failed on %s, falling back to subprocess",
+                conn.label,
+                exc_info=True,
+            )
+
     cmd = list(conn.reach_command) + [remote_cmd]
     _logger.debug(
         "Remote exec on %s: %s", conn.label, " ".join(shlex.quote(c) for c in cmd)
@@ -88,11 +73,184 @@ def _exec_remote(
 
 
 # ---------------------------------------------------------------------------
+# Persistent remote shell
+# ---------------------------------------------------------------------------
+
+
+class PersistentShell:
+    """A persistent remote shell that multiplexes commands over one connection.
+
+    Instead of spawning a new subprocess (and establishing a new SSH /
+    ``juju ssh`` / ``kubectl exec`` session) for every command, this
+    class keeps a single ``bash`` process running on the remote host and
+    sends commands through its stdin.  Output is delimited by unique
+    sentinel strings so that each :meth:`exec_command` call can
+    reliably extract only its own output from the shared stdout stream.
+
+    This is **transport-agnostic** — it works with any *reach_command*
+    prefix that ultimately yields an interactive shell::
+
+        shell = PersistentShell(["ssh", "ubuntu@10.0.0.1"])
+        shell.open()
+        print(shell.exec_command("hostname"))
+        shell.close()
+
+    Or as a context manager::
+
+        with PersistentShell(["juju", "ssh", "keystone/0", "--"]) as sh:
+            print(sh.exec_command("cat /proc/stat"))
+
+    The shell is thread-safe — multiple threads may call
+    :meth:`exec_command` concurrently (they are serialised internally).
+    """
+
+    def __init__(self, reach_command: list[str], command_timeout: int = 40) -> None:
+        self._reach_command = list(reach_command)
+        self._command_timeout = command_timeout
+        self._lock = threading.Lock()
+        self._proc: subprocess.Popen[str] | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._stdout_q: queue.Queue[str | None] = queue.Queue()
+        self._counter = 0
+
+    # -- lifecycle ----------------------------------------------------------
+
+    def open(self) -> None:
+        """Start the persistent remote shell.
+
+        Launches ``bash`` through the *reach_command* prefix and starts
+        a background reader thread that feeds stdout lines into an
+        internal queue.
+        """
+        if self._proc is not None:
+            return
+        self._proc = subprocess.Popen(
+            self._reach_command + ["bash"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,  # line-buffered
+        )
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop,
+            daemon=True,
+            name="persistent-shell-reader",
+        )
+        self._reader_thread.start()
+        _logger.debug(
+            "Persistent shell opened: %s",
+            " ".join(shlex.quote(c) for c in self._reach_command),
+        )
+
+    def close(self) -> None:
+        """Shut down the persistent remote shell."""
+        if self._proc is None:
+            return
+        try:
+            self._proc.stdin.close()  # type: ignore[union-attr]
+        except OSError:
+            pass
+        self._proc.terminate()
+        try:
+            self._proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            self._proc.wait()
+        self._proc = None
+        _logger.debug("Persistent shell closed")
+
+    def __enter__(self) -> PersistentShell:
+        self.open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        self.close()
+
+    # -- properties ---------------------------------------------------------
+
+    @property
+    def is_alive(self) -> bool:
+        """``True`` if the underlying process is still running."""
+        return self._proc is not None and self._proc.poll() is None
+
+    # -- command execution --------------------------------------------------
+
+    def exec_command(self, cmd: str, timeout: int | None = None) -> str:
+        """Execute *cmd* in the remote shell and return its stdout.
+
+        Commands are serialised internally so this method is safe to
+        call from multiple threads.
+
+        Raises :class:`RuntimeError` if the shell has died and
+        :class:`TimeoutError` if *timeout* (or the default
+        ``command_timeout``) is exceeded.
+        """
+        timeout = timeout or self._command_timeout
+
+        with self._lock:
+            if not self.is_alive:
+                raise RuntimeError("Persistent shell is not running")
+
+            self._counter += 1
+            sentinel = "---OSSTRESS-SHELL-END-%d---" % self._counter
+
+            wrapped = "%s\necho '%s'\n" % (cmd, sentinel)
+            self._proc.stdin.write(wrapped)  # type: ignore[union-attr]
+            self._proc.stdin.flush()  # type: ignore[union-attr]
+
+            output_lines: list[str] = []
+            deadline = time.monotonic() + timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        "Persistent shell command timed out after %ds"
+                        % timeout
+                    )
+                try:
+                    line = self._stdout_q.get(timeout=remaining)
+                except queue.Empty:
+                    raise TimeoutError(
+                        "Persistent shell command timed out after %ds"
+                        % timeout
+                    )
+                if line is None:
+                    raise RuntimeError(
+                        "Persistent shell process exited unexpectedly"
+                    )
+                if sentinel in line:
+                    break
+                output_lines.append(line)
+            return "".join(output_lines)
+
+    # -- internal -----------------------------------------------------------
+
+    def _reader_loop(self) -> None:
+        """Background thread: read stdout lines into the queue."""
+        try:
+            while True:
+                line = self._proc.stdout.readline()  # type: ignore[union-attr]
+                if not line:  # EOF
+                    break
+                self._stdout_q.put(line)
+        except (ValueError, OSError):
+            pass
+        # Signal EOF so any blocked exec_command wakes up.
+        self._stdout_q.put(None)
+
+
+# ---------------------------------------------------------------------------
 # Metric snapshot classes  (plain classes – no dataclasses)
 # ---------------------------------------------------------------------------
 
 
-class CpuSnapshot(object):
+class CpuSnapshot:
     """Raw counters from ``/proc/stat`` (first ``cpu`` line)."""
 
     __slots__ = (
@@ -109,16 +267,16 @@ class CpuSnapshot(object):
 
     def __init__(
         self,
-        user,  # type: int
-        nice,  # type: int
-        system,  # type: int
-        idle,  # type: int
-        iowait,  # type: int
-        irq,  # type: int
-        softirq,  # type: int
-        steal,  # type: int
-        timestamp,  # type: float
-    ):
+        user: int,
+        nice: int,
+        system: int,
+        idle: int,
+        iowait: int,
+        irq: int,
+        softirq: int,
+        steal: int,
+        timestamp: float,
+    ) -> None:
         self.user = user
         self.nice = nice
         self.system = system
@@ -130,8 +288,7 @@ class CpuSnapshot(object):
         self.timestamp = timestamp
 
     @property
-    def total(self):
-        # type: () -> int
+    def total(self) -> int:
         return (
             self.user
             + self.nice
@@ -144,12 +301,10 @@ class CpuSnapshot(object):
         )
 
     @property
-    def busy(self):
-        # type: () -> int
+    def busy(self) -> int:
         return self.total - self.idle - self.iowait
 
-    def to_dict(self):
-        # type: () -> Dict[str, Any]
+    def to_dict(self) -> dict[str, Any]:
         return {
             "user": self.user,
             "nice": self.nice,
@@ -163,7 +318,7 @@ class CpuSnapshot(object):
         }
 
 
-class MemorySnapshot(object):
+class MemorySnapshot:
     """Parsed subset of ``/proc/meminfo`` (values in kB)."""
 
     __slots__ = (
@@ -179,15 +334,15 @@ class MemorySnapshot(object):
 
     def __init__(
         self,
-        mem_total_kb,  # type: int
-        mem_free_kb,  # type: int
-        mem_available_kb,  # type: int
-        buffers_kb,  # type: int
-        cached_kb,  # type: int
-        swap_total_kb,  # type: int
-        swap_free_kb,  # type: int
-        timestamp,  # type: float
-    ):
+        mem_total_kb: int,
+        mem_free_kb: int,
+        mem_available_kb: int,
+        buffers_kb: int,
+        cached_kb: int,
+        swap_total_kb: int,
+        swap_free_kb: int,
+        timestamp: float,
+    ) -> None:
         self.mem_total_kb = mem_total_kb
         self.mem_free_kb = mem_free_kb
         self.mem_available_kb = mem_available_kb
@@ -198,24 +353,20 @@ class MemorySnapshot(object):
         self.timestamp = timestamp
 
     @property
-    def mem_used_kb(self):
-        # type: () -> int
+    def mem_used_kb(self) -> int:
         return self.mem_total_kb - self.mem_available_kb
 
     @property
-    def mem_used_pct(self):
-        # type: () -> float
+    def mem_used_pct(self) -> float:
         if self.mem_total_kb == 0:
             return 0.0
         return round(self.mem_used_kb / self.mem_total_kb * 100, 2)
 
     @property
-    def swap_used_kb(self):
-        # type: () -> int
+    def swap_used_kb(self) -> int:
         return self.swap_total_kb - self.swap_free_kb
 
-    def to_dict(self):
-        # type: () -> Dict[str, Any]
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mem_total_kb": self.mem_total_kb,
             "mem_free_kb": self.mem_free_kb,
@@ -231,7 +382,7 @@ class MemorySnapshot(object):
         }
 
 
-class IoSnapshot(object):
+class IoSnapshot:
     """Aggregated I/O counters from ``/proc/diskstats``.
 
     Only *whole-disk* devices are aggregated (we skip partitions by
@@ -257,19 +408,19 @@ class IoSnapshot(object):
 
     def __init__(
         self,
-        reads_completed,  # type: int
-        reads_merged,  # type: int
-        sectors_read,  # type: int
-        ms_reading,  # type: int
-        writes_completed,  # type: int
-        writes_merged,  # type: int
-        sectors_written,  # type: int
-        ms_writing,  # type: int
-        ios_in_progress,  # type: int
-        ms_doing_io,  # type: int
-        weighted_ms_doing_io,  # type: int
-        timestamp,  # type: float
-    ):
+        reads_completed: int,
+        reads_merged: int,
+        sectors_read: int,
+        ms_reading: int,
+        writes_completed: int,
+        writes_merged: int,
+        sectors_written: int,
+        ms_writing: int,
+        ios_in_progress: int,
+        ms_doing_io: int,
+        weighted_ms_doing_io: int,
+        timestamp: float,
+    ) -> None:
         self.reads_completed = reads_completed
         self.reads_merged = reads_merged
         self.sectors_read = sectors_read
@@ -283,8 +434,7 @@ class IoSnapshot(object):
         self.weighted_ms_doing_io = weighted_ms_doing_io
         self.timestamp = timestamp
 
-    def to_dict(self):
-        # type: () -> Dict[str, Any]
+    def to_dict(self) -> dict[str, Any]:
         return {
             "reads_completed": self.reads_completed,
             "reads_merged": self.reads_merged,
@@ -301,25 +451,25 @@ class IoSnapshot(object):
         }
 
 
-class HostMetricsSnapshot(object):
+class HostMetricsSnapshot:
     """A single point-in-time snapshot of host resource usage."""
 
     __slots__ = ("label", "cpu", "memory", "io")
 
     def __init__(
         self,
-        label,  # type: str
-        cpu=None,  # type: Optional[CpuSnapshot]
-        memory=None,  # type: Optional[MemorySnapshot]
-        io=None,  # type: Optional[IoSnapshot]
-    ):
+        label: str,
+        cpu: CpuSnapshot | None = None,
+        memory: MemorySnapshot | None = None,
+        io: IoSnapshot | None = None,
+    ) -> None:
         self.label = label
         self.cpu = cpu
         self.memory = memory
         self.io = io
 
 
-class HostConnection(object):
+class HostConnection:
     """Parameters needed to reach a target host for remote command execution.
 
     The *reach_command* is a list of strings forming the command prefix
@@ -334,22 +484,21 @@ class HostConnection(object):
 
         # Kubernetes
         HostConnection("api-pod", ["kubectl", "exec", "api-pod", "--", "bash", "-c"])
-
-    Use :func:`build_ssh_reach_command` to construct the *reach_command*
-    from traditional SSH parameters (host, username, port, key file).
     """
 
-    __slots__ = ("label", "reach_command", "command_timeout")
+    __slots__ = ("label", "reach_command", "command_timeout", "shell")
 
     def __init__(
         self,
-        label,  # type: str
-        reach_command,  # type: List[str]
-        command_timeout=40,  # type: int
-    ):
+        label: str,
+        reach_command: list[str],
+        command_timeout: int = 40,
+        shell: PersistentShell | None = None,
+    ) -> None:
         self.label = label
         self.reach_command = list(reach_command)
         self.command_timeout = command_timeout
+        self.shell = shell
 
 
 # ---------------------------------------------------------------------------
@@ -357,8 +506,7 @@ class HostConnection(object):
 # ---------------------------------------------------------------------------
 
 
-def _parse_cpu(raw):
-    # type: (str) -> Optional[CpuSnapshot]
+def _parse_cpu(raw: str) -> CpuSnapshot | None:
     """Parse the ``cpu`` aggregate line from ``/proc/stat``."""
     for line in raw.splitlines():
         if line.startswith("cpu "):
@@ -381,10 +529,9 @@ def _parse_cpu(raw):
     return None
 
 
-def _parse_meminfo(raw):
-    # type: (str) -> Optional[MemorySnapshot]
+def _parse_meminfo(raw: str) -> MemorySnapshot | None:
     """Parse ``/proc/meminfo`` output."""
-    fields = {}  # type: Dict[str, int]
+    fields: dict[str, int] = {}
     for line in raw.splitlines():
         parts = line.split()
         if len(parts) >= 2:
@@ -410,8 +557,7 @@ def _parse_meminfo(raw):
         return None
 
 
-def _parse_diskstats(raw):
-    # type: (str) -> Optional[IoSnapshot]
+def _parse_diskstats(raw: str) -> IoSnapshot | None:
     """Parse ``/proc/diskstats`` and aggregate across all whole-disk devices."""
     totals = [0] * 11
     found_any = False
@@ -460,8 +606,7 @@ def _parse_diskstats(raw):
 # ---------------------------------------------------------------------------
 
 
-def collect_snapshot(conn, label):
-    # type: (HostConnection, str) -> HostMetricsSnapshot
+def collect_snapshot(conn: HostConnection, label: str) -> HostMetricsSnapshot:
     """Collect a single snapshot of CPU, memory and I/O metrics.
 
     The three ``/proc`` files are read in a single remote invocation to
@@ -492,8 +637,7 @@ def collect_snapshot(conn, label):
 # ---------------------------------------------------------------------------
 
 
-def cpu_usage_pct(before, after):
-    # type: (CpuSnapshot, CpuSnapshot) -> Dict[str, float]
+def cpu_usage_pct(before: CpuSnapshot, after: CpuSnapshot) -> dict[str, float]:
     """Compute CPU usage percentages between two snapshots."""
     d_total = max(after.total - before.total, 1)
     return {
@@ -509,8 +653,7 @@ def cpu_usage_pct(before, after):
     }
 
 
-def io_diff(before, after):
-    # type: (IoSnapshot, IoSnapshot) -> Dict[str, int]
+def io_diff(before: IoSnapshot, after: IoSnapshot) -> dict[str, int]:
     """Compute I/O counter deltas between two snapshots."""
     return {
         "reads_completed": after.reads_completed - before.reads_completed,
@@ -523,10 +666,9 @@ def io_diff(before, after):
     }
 
 
-def snapshot_to_dict(snap):
-    # type: (HostMetricsSnapshot) -> Dict[str, Any]
+def snapshot_to_dict(snap: HostMetricsSnapshot) -> dict[str, Any]:
     """Serialise a snapshot to a JSON-friendly dictionary."""
-    result = {"label": snap.label}  # type: Dict[str, Any]
+    result: dict[str, Any] = {"label": snap.label}
     if snap.cpu:
         result["cpu"] = snap.cpu.to_dict()
     if snap.memory:
@@ -536,8 +678,9 @@ def snapshot_to_dict(snap):
     return result
 
 
-def build_rally_output_charts(snapshots):
-    # type: (List[HostMetricsSnapshot]) -> List[Dict[str, Any]]
+def build_rally_output_charts(
+    snapshots: list[HostMetricsSnapshot],
+) -> list[dict[str, Any]]:
     """Build Rally ``add_output`` chart data from a list of snapshots.
 
     This is the **single-host** variant.  For HA / multi-host scenarios
@@ -546,10 +689,10 @@ def build_rally_output_charts(snapshots):
     Returns a list of *complete* output dicts that can each be passed to
     ``self.add_output(complete=...)`` inside a scenario's ``run`` method.
     """
-    charts = []  # type: List[Dict[str, Any]]
+    charts: list[dict[str, Any]] = []
 
     # --- Memory usage chart ---
-    mem_data = []  # type: List[List[Any]]
+    mem_data: list[list[Any]] = []
     for snap in snapshots:
         if snap.memory:
             mem_data.append([snap.label, snap.memory.mem_used_pct])
@@ -568,7 +711,7 @@ def build_rally_output_charts(snapshots):
         )
 
     # --- CPU usage (requires at least two snapshots to diff) ---
-    cpu_series_data = []  # type: List[List[Any]]
+    cpu_series_data: list[list[Any]] = []
     for i in range(1, len(snapshots)):
         before_cpu = snapshots[i - 1].cpu
         after_cpu = snapshots[i].cpu
@@ -590,8 +733,8 @@ def build_rally_output_charts(snapshots):
         )
 
     # --- I/O (requires at least two snapshots to diff) ---
-    io_read_data = []  # type: List[List[Any]]
-    io_write_data = []  # type: List[List[Any]]
+    io_read_data: list[list[Any]] = []
+    io_write_data: list[list[Any]] = []
     for i in range(1, len(snapshots)):
         before_io = snapshots[i - 1].io
         after_io = snapshots[i].io
@@ -600,7 +743,7 @@ def build_rally_output_charts(snapshots):
             io_read_data.append([snapshots[i].label, delta["sectors_read"]])
             io_write_data.append([snapshots[i].label, delta["sectors_written"]])
     if io_read_data or io_write_data:
-        series = []  # type: List[List[Any]]
+        series: list[list[Any]] = []
         if io_read_data:
             series.append(
                 ["Sectors Read", [[i, v[1]] for i, v in enumerate(io_read_data)]]
@@ -621,7 +764,7 @@ def build_rally_output_charts(snapshots):
         )
 
     # --- Detailed table with raw numbers ---
-    table_data = []  # type: List[List[Any]]
+    table_data: list[list[Any]] = []
     for snap in snapshots:
         d = snapshot_to_dict(snap)
         mem_used = d.get("memory", {}).get("mem_used_pct", "N/A")
@@ -664,8 +807,9 @@ def build_rally_output_charts(snapshots):
 _SAMPLE_LABELS = ("baseline", "mid_pre_trigger", "post_trigger", "final")
 
 
-def build_rally_output_charts_multi(host_snapshots):
-    # type: (Dict[str, List[HostMetricsSnapshot]]) -> List[Dict[str, Any]]
+def build_rally_output_charts_multi(
+    host_snapshots: dict[str, list[HostMetricsSnapshot]],
+) -> list[dict[str, Any]]:
     """Build Rally ``add_output`` chart data for **multiple hosts**.
 
     *host_snapshots* is a mapping of ``host_label -> [snap0, snap1, ...]``
@@ -678,13 +822,13 @@ def build_rally_output_charts_multi(host_snapshots):
     Returns a list of *complete* output dicts suitable for
     ``self.add_output(complete=...)``.
     """
-    charts = []  # type: List[Dict[str, Any]]
+    charts: list[dict[str, Any]] = []
     host_labels = sorted(host_snapshots.keys())
 
     # ---- Memory usage — one series per host --------------------------------
-    mem_series = []  # type: List[List[Any]]
+    mem_series: list[list[Any]] = []
     for hlabel in host_labels:
-        points = []  # type: List[List[Any]]
+        points: list[list[Any]] = []
         for idx, snap in enumerate(host_snapshots[hlabel]):
             if snap.memory:
                 points.append([idx, snap.memory.mem_used_pct])
@@ -706,10 +850,10 @@ def build_rally_output_charts_multi(host_snapshots):
         )
 
     # ---- CPU busy % — one series per host ----------------------------------
-    cpu_series = []  # type: List[List[Any]]
+    cpu_series: list[list[Any]] = []
     for hlabel in host_labels:
         snaps = host_snapshots[hlabel]
-        points = []  # type: List[List[Any]]
+        points = []
         for idx in range(1, len(snaps)):
             b_cpu = snaps[idx - 1].cpu
             a_cpu = snaps[idx].cpu
@@ -734,12 +878,12 @@ def build_rally_output_charts_multi(host_snapshots):
         )
 
     # ---- Disk I/O sectors read — one series per host -----------------------
-    io_read_series = []  # type: List[List[Any]]
-    io_write_series = []  # type: List[List[Any]]
+    io_read_series: list[list[Any]] = []
+    io_write_series: list[list[Any]] = []
     for hlabel in host_labels:
         snaps = host_snapshots[hlabel]
-        rd_points = []  # type: List[List[Any]]
-        wr_points = []  # type: List[List[Any]]
+        rd_points: list[list[Any]] = []
+        wr_points: list[list[Any]] = []
         for idx in range(1, len(snaps)):
             b_io = snaps[idx - 1].io
             a_io = snaps[idx].io
@@ -768,7 +912,7 @@ def build_rally_output_charts_multi(host_snapshots):
         )
 
     # ---- Raw snapshot table — one row per (host, sample) -------------------
-    table_rows = []  # type: List[List[str]]
+    table_rows: list[list[str]] = []
     for hlabel in host_labels:
         for snap in host_snapshots[hlabel]:
             d = snapshot_to_dict(snap)
