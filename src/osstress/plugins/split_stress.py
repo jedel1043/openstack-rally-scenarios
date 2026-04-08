@@ -1,6 +1,6 @@
 """OsStress Rally scenario plugin — ``OsStress.split_stress``.
 
-Runs an OpenStack scenario with a trigger fired at the midpoint.
+Runs a Rally scenario with a trigger fired at the midpoint.
 
 All iterations are executed in a **single continuous run** so the request
 rate stays constant.  A monitor thread watches progress and fires the
@@ -18,8 +18,6 @@ system state while it is actually under load, not just at idle phase
 boundaries.
 """
 
-from __future__ import annotations
-
 import copy
 import logging
 import shlex
@@ -34,27 +32,30 @@ from common import DEFAULT_RUNNER, collect_runner_results
 from metrics import (
     HostConnection,
     PersistentShell,
-    build_rally_output_charts_multi,
-    collect_snapshot,
-    cpu_usage_pct,
-    io_diff,
+    build_rally_output_charts,
 )
-from rally.task import atomic, scenario, validation
-from rally.task import runner as rally_runner
-from rally_openstack.task import scenario as os_scenario
+from rally.task import atomic, scenario
+from rally.task.runner import ScenarioRunner
 
-LOG = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+@dataclass(slots=True)
+class CommandResult:
+    """Result of a remote command execution on a single host."""
+
+    host: str
+    command: str
+    returncode: int
+    duration: float
+    stdout: str = ""
+    stderr: str = ""
 
 
 def _remote_trigger(
     conn: HostConnection,
     command: str,
-) -> dict[str, Any]:
+) -> CommandResult:
     """Execute *command* on the remote host and return execution details.
 
     Uses the transport-agnostic *reach_command* stored in *conn*.  This
@@ -62,7 +63,7 @@ def _remote_trigger(
     command prefix that accepts a shell command as a trailing argument.
     """
     cmd = list(conn.reach_command) + [command]
-    LOG.info(
+    logger.info(
         "Remote command on %s: %s",
         conn.label,
         " ".join(shlex.quote(c) for c in cmd),
@@ -81,22 +82,22 @@ def _remote_trigger(
     )
     elapsed = time.monotonic() - t0
 
-    info: dict[str, Any] = {
-        "host": conn.label,
-        "command": command,
-        "returncode": result.returncode,
-        "duration": round(elapsed, 4),
-        "stdout": result.stdout[:4096],
-        "stderr": result.stderr[:4096],
-    }
+    cmd_result = CommandResult(
+        host=conn.label,
+        command=command,
+        returncode=result.returncode,
+        duration=round(elapsed, 4),
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
     if result.returncode != 0:
-        LOG.warning(
+        logger.warning(
             "Remote command on %s exited %d – stderr: %s",
             conn.label,
             result.returncode,
             result.stderr.strip()[:512],
         )
-    return info
+    return cmd_result
 
 
 # Opaque handle returned by _remote_trigger_async — callers must pass it
@@ -119,7 +120,7 @@ def _remote_trigger_async(
     should keep running while the remaining iterations execute.
     """
     cmd = list(conn.reach_command) + [command]
-    LOG.info(
+    logger.info(
         "Background trigger on %s: %s",
         conn.label,
         " ".join(shlex.quote(c) for c in cmd),
@@ -135,17 +136,17 @@ def _remote_trigger_async(
 
 def _collect_trigger_results(
     handles: list[_AsyncHandle],
-) -> list[dict[str, Any]]:
+) -> list[CommandResult]:
     """Terminate every async trigger and return result-info dicts.
 
     *handles* is a list of opaque handles returned by
     :func:`_remote_trigger_async`.  Each process that is still running
     is terminated immediately so the scenario can proceed to cleanup.
     """
-    infos: list[dict[str, Any]] = []
+    infos: list[CommandResult] = []
     for label, command, proc, t0 in handles:
         if proc.poll() is None:
-            LOG.info("Terminating background trigger on %s", label)
+            logger.info("Terminating background trigger on %s", label)
             proc.terminate()
             try:
                 stdout, stderr = proc.communicate(timeout=10)
@@ -155,16 +156,16 @@ def _collect_trigger_results(
         else:
             stdout, stderr = proc.communicate()
         elapsed = time.monotonic() - t0
-        info: dict[str, Any] = {
-            "host": label,
-            "command": command,
-            "returncode": proc.returncode if proc.returncode is not None else -1,
-            "duration": round(elapsed, 4),
-            "stdout": (stdout or "")[:4096],
-            "stderr": (stderr or "")[:4096],
-        }
+        info = CommandResult(
+            host=label,
+            command=command,
+            returncode=proc.returncode if proc.returncode is not None else -1,
+            duration=round(elapsed, 4),
+            stdout=stdout or "",
+            stderr=stderr or "",
+        )
         if proc.returncode and proc.returncode != 0:
-            LOG.warning(
+            logger.warning(
                 "Background trigger on %s exited %d – stderr: %s",
                 label,
                 proc.returncode,
@@ -221,9 +222,7 @@ def _build_connections(
 
         rc = entry.get("reach_command")
         if not rc:
-            raise ValueError(
-                f"hosts[{idx}] must contain 'reach_command'"
-            )
+            raise ValueError(f"hosts[{idx}] must contain 'reach_command'")
 
         rc_list = _parse_reach_command(rc)
         label = entry.get("label", rc if isinstance(rc, str) else " ".join(rc))
@@ -236,12 +235,14 @@ def _build_connections(
 
         trig = entry.get("trigger_command", "")
         clean = entry.get("cleanup_command", "")
-        conns.append(_Connection(
-            label=label,
-            conn=conn,
-            trigger_command=trig,
-            cleanup_command=clean,
-        ))
+        conns.append(
+            _Connection(
+                label=label,
+                conn=conn,
+                trigger_command=trig,
+                cleanup_command=clean,
+            )
+        )
     return conns
 
 
@@ -256,12 +257,12 @@ def _collect_all_snapshots(
     results: dict[str, Any] = {}
     if len(connections) == 1:
         e = connections[0]
-        results[e.label] = collect_snapshot(e.conn, sample_label)
+        results[e.label] = e.conn.collect_snapshot(sample_label)
         return results
 
     with ThreadPoolExecutor(max_workers=len(connections)) as pool:
         futures = {
-            pool.submit(collect_snapshot, e.conn, sample_label): e.label
+            pool.submit(e.conn.collect_snapshot, sample_label): e.label
             for e in connections
         }
         for fut in as_completed(futures):
@@ -269,7 +270,7 @@ def _collect_all_snapshots(
             try:
                 results[label] = fut.result()
             except Exception as exc:
-                LOG.warning("Metrics collection failed for %s: %s", label, exc)
+                logger.warning("Metrics collection failed for %s: %s", label, exc)
     return results
 
 
@@ -310,9 +311,7 @@ class _SnapshotCollector:
         self._stop = threading.Event()
         self._phase = "idle"
         self._counter = 0
-        self._snapshots: dict[str, list] = {
-            e.label: [] for e in connections
-        }
+        self._snapshots: dict[str, list] = {e.label: [] for e in connections}
         self._thread: threading.Thread | None = None
         self._shells: list[PersistentShell] = []
 
@@ -322,15 +321,7 @@ class _SnapshotCollector:
         """Update the phase label applied to subsequent snapshots."""
         self._phase = phase
 
-    # -- lifecycle ----------------------------------------------------------
-
     def start(self) -> None:
-        # Open a persistent shell for each connection so that repeated
-        # snapshot collections reuse a single remote session instead of
-        # spawning a new process (and handshake) every time.
-        # When use_persistent_shell is False we skip this entirely and
-        # every collection spawns a fresh subprocess — slower but more
-        # robust for long-lived tests.
         if self._use_persistent_shell:
             for e in self._connections:
                 shell = PersistentShell(
@@ -341,22 +332,24 @@ class _SnapshotCollector:
                     shell.open()
                     e.conn.shell = shell
                     self._shells.append(shell)
-                    LOG.debug("Persistent shell opened for %s", e.conn.label)
+                    logger.debug("Persistent shell opened for %s", e.conn.label)
                 except Exception:
-                    LOG.warning(
+                    logger.warning(
                         "Failed to open persistent shell for %s; "
                         "falling back to per-command subprocesses",
                         e.conn.label,
                         exc_info=True,
                     )
         else:
-            LOG.info(
+            logger.info(
                 "Persistent shells disabled; each snapshot will spawn "
                 "a fresh subprocess per host"
             )
 
         self._thread = threading.Thread(
-            target=self._loop, daemon=True, name="snapshot-collector",
+            target=self._loop,
+            daemon=True,
+            name="snapshot-collector",
         )
         self._thread.start()
 
@@ -371,7 +364,7 @@ class _SnapshotCollector:
             try:
                 shell.close()
             except Exception:
-                LOG.debug("Error closing persistent shell", exc_info=True)
+                logger.debug("Error closing persistent shell", exc_info=True)
         self._shells.clear()
         for e in self._connections:
             e.conn.shell = None
@@ -403,12 +396,13 @@ class _SnapshotCollector:
             sample_label = f"{self._phase} #{self._counter}"
             try:
                 results = _collect_all_snapshots(
-                    self._connections, sample_label,
+                    self._connections,
+                    sample_label,
                 )
                 for host_label, snap in results.items():
                     self._snapshots[host_label].append(snap)
             except Exception:
-                LOG.warning(
+                logger.warning(
                     "Background snapshot #%d failed",
                     self._counter,
                     exc_info=True,
@@ -419,7 +413,7 @@ class _SnapshotCollector:
 def _run_commands_on_hosts(
     targets: list[tuple[str, HostConnection, str]],
     phase_name: str,
-) -> list[dict[str, Any]]:
+) -> list[CommandResult]:
     """Fire a command on every host in *targets*, in parallel.
 
     *targets* is a list of ``(label, HostConnection, command)`` triples.
@@ -428,11 +422,7 @@ def _run_commands_on_hosts(
     *phase_name* is used only for log messages (e.g. ``"trigger"`` or
     ``"cleanup"``).
     """
-    to_run = [
-        (label, conn, cmd)
-        for label, conn, cmd in targets
-        if cmd
-    ]
+    to_run = [(label, conn, cmd) for label, conn, cmd in targets if cmd]
     if not to_run:
         return []
 
@@ -440,7 +430,7 @@ def _run_commands_on_hosts(
         _label, conn, cmd = to_run[0]
         return [_remote_trigger(conn, cmd)]
 
-    infos: list[dict[str, Any]] = []
+    infos: list[CommandResult] = []
     with ThreadPoolExecutor(max_workers=len(to_run)) as pool:
         futures = {
             pool.submit(_remote_trigger, conn, cmd): label
@@ -451,15 +441,16 @@ def _run_commands_on_hosts(
             try:
                 infos.append(fut.result())
             except Exception as exc:
-                LOG.warning("%s failed for %s: %s", phase_name, label, exc)
-                infos.append({
-                    "host": label,
-                    "command": "(failed)",
-                    "returncode": -1,
-                    "duration": 0,
-                    "stdout": "",
-                    "stderr": str(exc),
-                })
+                logger.warning("%s failed for %s: %s", phase_name, label, exc)
+                infos.append(
+                    CommandResult(
+                        host=label,
+                        command="(failed)",
+                        returncode=-1,
+                        duration=0,
+                        stderr=str(exc),
+                    )
+                )
     return infos
 
 
@@ -483,12 +474,9 @@ def _start_triggers_async(
 
 def _cleanup_all(
     connections: list[_Connection],
-) -> list[dict[str, Any]]:
+) -> list[CommandResult]:
     """Fire the cleanup command on every host, in parallel."""
-    targets = [
-        (e.label, e.conn, e.cleanup_command)
-        for e in connections
-    ]
+    targets = [(e.label, e.conn, e.cleanup_command) for e in connections]
     return _run_commands_on_hosts(targets, "Cleanup")
 
 
@@ -497,13 +485,11 @@ def _cleanup_all(
 # ---------------------------------------------------------------------------
 
 
-@validation.add("required_platform", platform="openstack", users=True)
-@os_scenario.configure(
+@scenario.configure(
     name="OsStress.split_stress",
-    platform="openstack",
 )
-class SplitStress(os_scenario.OpenStackScenario):
-    """Run an OpenStack scenario with a trigger fired at the midpoint.
+class SplitStress(scenario.Scenario):
+    """Run a Rally scenario with a trigger fired at the midpoint.
 
     All iterations are executed in a **single continuous run** so the
     request rate stays constant — there is no gap between a "first half"
@@ -637,7 +623,7 @@ class SplitStress(os_scenario.OpenStackScenario):
         # -- Build the runner ------------------------------------------------
         step_cfg = dict(runner_cfg)
         step_cfg["times"] = total_times
-        runner_cls = rally_runner.ScenarioRunner.get(step_cfg["type"])
+        runner_cls = ScenarioRunner.get(step_cfg["type"])
         runner_obj = runner_cls(task=task_obj, config=step_cfg)
 
         # Shared state between the runner thread and the monitor thread.
@@ -663,7 +649,7 @@ class SplitStress(os_scenario.OpenStackScenario):
                     # Poll at a short interval to react quickly.
                     runner_done.wait(0.05)
             except Exception as exc:
-                LOG.error("Trigger monitor failed: %s", exc, exc_info=True)
+                logger.error("Trigger monitor failed: %s", exc, exc_info=True)
                 trigger_error.append(exc)
 
         runner_done = threading.Event()
@@ -676,7 +662,9 @@ class SplitStress(os_scenario.OpenStackScenario):
 
         # -- Background metrics collection -----------------------------------
         collector = _SnapshotCollector(
-            connections, snapshot_interval, use_persistent_shell,
+            connections,
+            snapshot_interval,
+            use_persistent_shell,
         )
         collector.set_phase("pre_trigger")
 
@@ -706,7 +694,7 @@ class SplitStress(os_scenario.OpenStackScenario):
                 trigger_infos = _collect_trigger_results(async_handles)
 
         # -- 3. Cleanup command(s) ------------------------------------------
-        cleanup_infos: list[dict[str, Any]] = []
+        cleanup_infos: list[CommandResult] = []
         if has_cleanup:
             cleanup_infos = _cleanup_all(connections)
 
@@ -726,7 +714,7 @@ class SplitStress(os_scenario.OpenStackScenario):
             ]
         else:
             # Trigger never fired (e.g. too few iterations).
-            LOG.warning(
+            logger.warning(
                 "Trigger did not fire — all %d results are attributed "
                 "to the first half",
                 len(all_results),
@@ -735,12 +723,13 @@ class SplitStress(os_scenario.OpenStackScenario):
             second_results = []
 
         if trigger_error:
-            LOG.warning(
-                "Trigger monitor encountered an error: %s", trigger_error[0],
+            logger.warning(
+                "Trigger monitor encountered an error: %s",
+                trigger_error[0],
             )
 
         # -- 5. Attach output data to Rally report --------------------------
-        self._emit_output_multi(
+        self._emit_output(
             host_snapshots=host_snapshots,
             first_results=first_results,
             second_results=second_results,
@@ -767,28 +756,34 @@ class SplitStress(os_scenario.OpenStackScenario):
 
         duration_series: list[list[Any]] = []
         if first_durations:
-            duration_series.append([
-                "First Half",
-                [[i, d] for i, d in enumerate(first_durations)],
-            ])
+            duration_series.append(
+                [
+                    "First Half",
+                    [[i, d] for i, d in enumerate(first_durations)],
+                ]
+            )
         if second_durations:
             offset = len(first_durations)
-            duration_series.append([
-                "Second Half",
-                [[offset + i, d] for i, d in enumerate(second_durations)],
-            ])
+            duration_series.append(
+                [
+                    "Second Half",
+                    [[offset + i, d] for i, d in enumerate(second_durations)],
+                ]
+            )
         if duration_series:
-            self.add_output(complete={
-                "title": f"Iteration Durations – {scenario_name}",
-                "description": (
-                    "Per-iteration duration (seconds) for the first and "
-                    "second halves of the workload"
-                ),
-                "chart_plugin": "Lines",
-                "data": duration_series,
-                "label": "Duration (s)",
-                "axis_label": "Iteration",
-            })
+            self.add_output(
+                complete={
+                    "title": f"Iteration Durations – {scenario_name}",
+                    "description": (
+                        "Per-iteration duration (seconds) for the first and "
+                        "second halves of the workload"
+                    ),
+                    "chart_plugin": "Lines",
+                    "data": duration_series,
+                    "label": "Duration (s)",
+                    "axis_label": "Iteration",
+                }
+            )
 
         # --- Additive summary pie ---
         first_failures = sum(1 for r in first_results if r["error"])
@@ -796,21 +791,23 @@ class SplitStress(os_scenario.OpenStackScenario):
         first_ok = len(first_results) - first_failures
         second_ok = len(second_results) - second_failures
 
-        self.add_output(additive={
-            "title": "Iteration Outcome Summary",
-            "description": "Successes and failures before/after the trigger",
-            "chart_plugin": "Pie",
-            "data": [
-                ["First Half OK", first_ok],
-                ["First Half Fail", first_failures],
-                ["Second Half OK", second_ok],
-                ["Second Half Fail", second_failures],
-            ],
-        })
+        self.add_output(
+            additive={
+                "title": "Iteration Outcome Summary",
+                "description": "Successes and failures before/after the trigger",
+                "chart_plugin": "Pie",
+                "data": [
+                    ["First Half OK", first_ok],
+                    ["First Half Fail", first_failures],
+                    ["Second Half OK", second_ok],
+                    ["Second Half Fail", second_failures],
+                ],
+            }
+        )
 
     def _emit_command_table(
         self,
-        infos: list[dict[str, Any]],
+        infos: list[CommandResult],
         title: str,
         description: str,
     ) -> None:
@@ -821,31 +818,37 @@ class SplitStress(os_scenario.OpenStackScenario):
         cols = ["Property", "Value"]
         rows: list[list[str]] = []
         for info in infos:
-            host_prefix = f"[{info.get('host', '?')}] "
-            rows.append([host_prefix + "Command", info["command"]])
-            rows.append([host_prefix + "Return Code", str(info["returncode"])])
-            rows.append([host_prefix + "Duration (s)", str(info["duration"])])
-            rows.append([host_prefix + "stdout (truncated)", info["stdout"][:512] or "(empty)"])
-            rows.append([host_prefix + "stderr (truncated)", info["stderr"][:512] or "(empty)"])
+            host_prefix = f"[{info.host}] "
+            rows.append([host_prefix + "Command", info.command])
+            rows.append([host_prefix + "Return Code", str(info.returncode)])
+            rows.append([host_prefix + "Duration (s)", str(info.duration)])
+            rows.append(
+                [host_prefix + "stdout (truncated)", info.stdout[:512] or "(empty)"]
+            )
+            rows.append(
+                [host_prefix + "stderr (truncated)", info.stderr[:512] or "(empty)"]
+            )
 
-        self.add_output(complete={
-            "title": title,
-            "description": description,
-            "chart_plugin": "Table",
-            "data": {"cols": cols, "rows": rows},
-        })
+        self.add_output(
+            complete={
+                "title": title,
+                "description": description,
+                "chart_plugin": "Table",
+                "data": {"cols": cols, "rows": rows},
+            }
+        )
 
     # -------------------------------------------------------------------
     # Output helpers – multi-host (HA)
     # -------------------------------------------------------------------
 
-    def _emit_output_multi(
+    def _emit_output(
         self,
         host_snapshots: dict[str, list],
         first_results: list[dict[str, Any]],
         second_results: list[dict[str, Any]],
-        trigger_infos: list[dict[str, Any]],
-        cleanup_infos: list[dict[str, Any]],
+        trigger_infos: list[CommandResult],
+        cleanup_infos: list[CommandResult],
         scenario_name: str,
     ) -> None:
         """Attach all collected data to the Rally report (multi-host)."""
@@ -853,7 +856,7 @@ class SplitStress(os_scenario.OpenStackScenario):
         host_labels = sorted(host_snapshots.keys())
 
         # --- Per-host comparison charts (memory / cpu / io) ---
-        for chart in build_rally_output_charts_multi(host_snapshots):
+        for chart in build_rally_output_charts(host_snapshots):
             self.add_output(complete=chart)
 
         # --- Iteration charts (host-independent) ---
@@ -881,34 +884,38 @@ class SplitStress(os_scenario.OpenStackScenario):
                 b = snaps[i - 1].cpu
                 a = snaps[i].cpu
                 if b and a:
-                    usage = cpu_usage_pct(b, a)
-                    cpu_rows.append([
-                        hlabel,
-                        f"{snaps[i - 1].label} -> {snaps[i].label}",
-                        f"{usage['user_pct']}%",
-                        f"{usage['system_pct']}%",
-                        f"{usage['iowait_pct']}%",
-                        f"{usage['idle_pct']}%",
-                        f"{usage['busy_pct']}%",
-                    ])
+                    usage = b.usage_pct(a)
+                    cpu_rows.append(
+                        [
+                            hlabel,
+                            f"{snaps[i - 1].label} -> {snaps[i].label}",
+                            f"{usage['user_pct']}%",
+                            f"{usage['system_pct']}%",
+                            f"{usage['iowait_pct']}%",
+                            f"{usage['idle_pct']}%",
+                            f"{usage['busy_pct']}%",
+                        ]
+                    )
         if cpu_rows:
-            self.add_output(complete={
-                "title": "Host CPU Usage Between Samples — All Hosts",
-                "description": "CPU time breakdown between consecutive snapshots per host",
-                "chart_plugin": "Table",
-                "data": {
-                    "cols": [
-                        "Host",
-                        "Interval",
-                        "User %",
-                        "System %",
-                        "IOWait %",
-                        "Idle %",
-                        "Busy %",
-                    ],
-                    "rows": cpu_rows,
-                },
-            })
+            self.add_output(
+                complete={
+                    "title": "Host CPU Usage Between Samples — All Hosts",
+                    "description": "CPU time breakdown between consecutive snapshots per host",
+                    "chart_plugin": "Table",
+                    "data": {
+                        "cols": [
+                            "Host",
+                            "Interval",
+                            "User %",
+                            "System %",
+                            "IOWait %",
+                            "Idle %",
+                            "Busy %",
+                        ],
+                        "rows": cpu_rows,
+                    },
+                }
+            )
 
         # --- I/O deltas table — all hosts combined ---
         io_rows: list[list[str]] = []
@@ -918,35 +925,39 @@ class SplitStress(os_scenario.OpenStackScenario):
                 b = snaps[i - 1].io
                 a = snaps[i].io
                 if b and a:
-                    delta = io_diff(b, a)
-                    io_rows.append([
-                        hlabel,
-                        f"{snaps[i - 1].label} -> {snaps[i].label}",
-                        str(delta["reads_completed"]),
-                        str(delta["sectors_read"]),
-                        str(delta["ms_reading"]),
-                        str(delta["writes_completed"]),
-                        str(delta["sectors_written"]),
-                        str(delta["ms_writing"]),
-                        str(delta["ms_doing_io"]),
-                    ])
+                    delta = b.diff(a)
+                    io_rows.append(
+                        [
+                            hlabel,
+                            f"{snaps[i - 1].label} -> {snaps[i].label}",
+                            str(delta["reads_completed"]),
+                            str(delta["sectors_read"]),
+                            str(delta["ms_reading"]),
+                            str(delta["writes_completed"]),
+                            str(delta["sectors_written"]),
+                            str(delta["ms_writing"]),
+                            str(delta["ms_doing_io"]),
+                        ]
+                    )
         if io_rows:
-            self.add_output(complete={
-                "title": "Host Disk I/O Between Samples — All Hosts",
-                "description": "Cumulative I/O counter deltas between snapshots per host",
-                "chart_plugin": "Table",
-                "data": {
-                    "cols": [
-                        "Host",
-                        "Interval",
-                        "Reads",
-                        "Sectors Read",
-                        "ms Reading",
-                        "Writes",
-                        "Sectors Written",
-                        "ms Writing",
-                        "ms Doing I/O",
-                    ],
-                    "rows": io_rows,
-                },
-            })
+            self.add_output(
+                complete={
+                    "title": "Host Disk I/O Between Samples — All Hosts",
+                    "description": "Cumulative I/O counter deltas between snapshots per host",
+                    "chart_plugin": "Table",
+                    "data": {
+                        "cols": [
+                            "Host",
+                            "Interval",
+                            "Reads",
+                            "Sectors Read",
+                            "ms Reading",
+                            "Writes",
+                            "Sectors Written",
+                            "ms Writing",
+                            "ms Doing I/O",
+                        ],
+                        "rows": io_rows,
+                    },
+                }
+            )

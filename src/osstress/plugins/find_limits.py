@@ -19,16 +19,12 @@ timing series and the discovered limit — appear in the standard Rally
 HTML report.
 """
 
-from __future__ import annotations
-
 import copy
 import logging
 import time
 from typing import Any
 
-from rally.task import atomic, scenario, validation
-
-from rally_openstack.task import scenario as os_scenario
+from rally.task import atomic, scenario
 
 from common import DEFAULT_RUNNER, run_via_runner
 
@@ -131,12 +127,10 @@ def _evaluate_sla(
 # ---------------------------------------------------------------------------
 
 
-@validation.add("required_platform", platform="openstack", users=True)
-@os_scenario.configure(
+@scenario.configure(
     name="OsStress.find_limits",
-    platform="openstack",
 )
-class FindLimits(os_scenario.OpenStackScenario):
+class FindLimits(scenario.Scenario):
     """Incrementally increase load until SLA thresholds are breached.
 
     This plugin wraps any available Rally scenario and runs it with a

@@ -1,30 +1,13 @@
 """Shared helpers for OsStress Rally scenario plugins."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
-from rally.task import runner as rally_runner, scenario
+from rally.task import runner as rally_runner
 
 LOG = logging.getLogger(__name__)
 
 DEFAULT_RUNNER: dict[str, Any] = {"type": "serial"}
-
-
-def resolve_scenario_cls(name: str) -> type:
-    """Look up a Rally scenario class by its full plugin name.
-
-    The *name* is the dot-separated identifier used in task files, e.g.
-    ``"Authenticate.keystone"`` or ``"GlanceImages.create_and_delete_image"``.
-    """
-    found = scenario.Scenario.get(name)
-    if found is None:
-        raise ValueError(
-            f"Could not find Rally scenario plugin '{name}'.  "
-            "Make sure rally-openstack is installed and the name is correct."
-        )
-    return found
 
 
 def collect_runner_results(
