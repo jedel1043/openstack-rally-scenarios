@@ -10,13 +10,20 @@ from metrics.snapshot import (
     HostMetricsSnapshot,
     IoSnapshot,
     MemorySnapshot,
+    NetSnapshot,
+    Snapshot,
 )
 
-_CMD_CPU = r"grep -E '^cpu ' /proc/stat"
-_CMD_MEMORY = "cat /proc/meminfo"
-_CMD_IO = "cat /proc/diskstats"
-
 _logger = logging.getLogger(__name__)
+
+# Ordered list of snapshot types to collect in a single remote invocation.
+# The order determines both the command built and the section indices returned.
+_SNAPSHOT_TYPES: list[type[Snapshot]] = [
+    CpuSnapshot,
+    MemorySnapshot,
+    IoSnapshot,
+    NetSnapshot,
+]
 
 
 class HostConnection:
@@ -101,26 +108,28 @@ class HostConnection:
         return result.stdout
 
     def collect_snapshot(self, label: str) -> HostMetricsSnapshot:
-        """Collect a single snapshot of CPU, memory and I/O metrics.
+        """Collect a single snapshot of CPU, memory, I/O and network metrics.
 
-        The three ``/proc`` files are read in a single remote invocation
+        The four ``/proc`` files are read in a single remote invocation
         to minimise round-trip overhead.
         """
 
-        combined_cmd = (
-            "{ %s; echo '---SEPARATOR---'; %s; echo '---SEPARATOR---'; %s; }"
-            % (_CMD_CPU, _CMD_MEMORY, _CMD_IO)
+        combined_cmd = "{ %s; }" % "; echo '---SEPARATOR---'; ".join(
+            "cat %s" % cls.proc_file() for cls in _SNAPSHOT_TYPES
         )
         raw = self.exec_remote(combined_cmd)
 
         sections = raw.split("---SEPARATOR---")
-        cpu_raw = sections[0] if len(sections) > 0 else ""
-        mem_raw = sections[1] if len(sections) > 1 else ""
-        io_raw = sections[2] if len(sections) > 2 else ""
+        parsed = {
+            cls: cls.parse(sections[i] if i < len(sections) else "")
+            for i, cls in enumerate(_SNAPSHOT_TYPES)
+        }
 
         return HostMetricsSnapshot(
             label=label,
-            cpu=CpuSnapshot.parse(cpu_raw),
-            memory=MemorySnapshot.parse(mem_raw),
-            io=IoSnapshot.parse(io_raw),
+            cpu=parsed.get(CpuSnapshot),  # type: ignore[arg-type]
+            memory=parsed.get(MemorySnapshot),  # type: ignore[arg-type]
+            io=parsed.get(IoSnapshot),  # type: ignore[arg-type]
+            net=parsed.get(NetSnapshot),  # type: ignore[arg-type]
         )
+

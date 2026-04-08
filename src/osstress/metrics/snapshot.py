@@ -1,16 +1,34 @@
 """Metric snapshot dataclasses with parsing and diffing capabilities."""
 
-
 import dataclasses
 import logging
 import time
+from abc import ABC, abstractmethod
 from typing import Any, Self
 
 _logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass(slots=True)
-class CpuSnapshot:
+class Snapshot(ABC):
+    """Abstract base for a single-file ``/proc`` metric snapshot."""
+
+    @abstractmethod
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the snapshot to a JSON-friendly dictionary."""
+
+    @classmethod
+    @abstractmethod
+    def parse(cls, raw: str) -> "Self | None":
+        """Parse raw text from :meth:`proc_file` into a snapshot instance."""
+
+    @staticmethod
+    @abstractmethod
+    def proc_file() -> str:
+        """Return the absolute path of the ``/proc`` file to read."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CpuSnapshot(Snapshot):
     """Raw counters from ``/proc/stat`` (first ``cpu`` line)."""
 
     user: int
@@ -23,9 +41,11 @@ class CpuSnapshot:
     steal: int
     timestamp: float
 
-    @property
-    def total(self) -> int:
-        return (
+    total: int = dataclasses.field(init=False)
+    busy: int = dataclasses.field(init=False)
+
+    def __post_init__(self) -> None:
+        total = (
             self.user
             + self.nice
             + self.system
@@ -35,17 +55,20 @@ class CpuSnapshot:
             + self.softirq
             + self.steal
         )
-
-    @property
-    def busy(self) -> int:
-        return self.total - self.idle - self.iowait
+        object.__setattr__(self, "total", total)
+        object.__setattr__(self, "busy", total - self.idle - self.iowait)
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
+    @staticmethod
+    def proc_file() -> str:
+        """Return the path to ``/proc/stat``."""
+        return "/proc/stat"
+
     @classmethod
     def parse(cls, raw: str) -> Self | None:
-        """Parse the ``cpu`` aggregate line from ``/proc/stat`` output."""
+        """Parse the ``cpu`` aggregate line from the full ``/proc/stat`` output."""
         for line in raw.splitlines():
             if line.startswith("cpu "):
                 parts = line.split()
@@ -82,8 +105,8 @@ class CpuSnapshot:
         }
 
 
-@dataclasses.dataclass(slots=True)
-class MemorySnapshot:
+@dataclasses.dataclass(frozen=True, slots=True)
+class MemorySnapshot(Snapshot):
     """Parsed subset of ``/proc/meminfo`` (values in kB)."""
 
     mem_total_kb: int
@@ -95,26 +118,22 @@ class MemorySnapshot:
     swap_free_kb: int
     timestamp: float
 
-    @property
-    def mem_used_kb(self) -> int:
-        return self.mem_total_kb - self.mem_available_kb
+    mem_used_kb: int = dataclasses.field(init=False)
+    swap_used_kb: int = dataclasses.field(init=False)
 
-    @property
-    def mem_used_pct(self) -> float:
-        if self.mem_total_kb == 0:
-            return 0.0
-        return round(self.mem_used_kb / self.mem_total_kb * 100, 2)
-
-    @property
-    def swap_used_kb(self) -> int:
-        return self.swap_total_kb - self.swap_free_kb
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "mem_used_kb", self.mem_total_kb - self.mem_available_kb
+        )
+        object.__setattr__(self, "swap_used_kb", self.swap_total_kb - self.swap_free_kb)
 
     def to_dict(self) -> dict[str, Any]:
-        d = dataclasses.asdict(self)
-        d["mem_used_kb"] = self.mem_used_kb
-        d["mem_used_pct"] = self.mem_used_pct
-        d["swap_used_kb"] = self.swap_used_kb
-        return d
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def proc_file() -> str:
+        """Return the path to ``/proc/meminfo``."""
+        return "/proc/meminfo"
 
     @classmethod
     def parse(cls, raw: str) -> Self | None:
@@ -145,8 +164,8 @@ class MemorySnapshot:
             return None
 
 
-@dataclasses.dataclass(slots=True)
-class IoSnapshot:
+@dataclasses.dataclass(frozen=True, slots=True)
+class IoSnapshot(Snapshot):
     """Aggregated I/O counters from ``/proc/diskstats``."""
 
     reads_completed: int
@@ -164,6 +183,11 @@ class IoSnapshot:
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
+
+    @staticmethod
+    def proc_file() -> str:
+        """Return the path to ``/proc/diskstats``."""
+        return "/proc/diskstats"
 
     @classmethod
     def parse(cls, raw: str) -> Self | None:
@@ -224,7 +248,94 @@ class IoSnapshot:
         }
 
 
-@dataclasses.dataclass(slots=True)
+@dataclasses.dataclass(frozen=True, slots=True)
+class NetSnapshot(Snapshot):
+    """Aggregated network counters from ``/proc/net/dev``.
+
+    Counters are summed across all non-loopback interfaces.
+    """
+
+    rx_bytes: int
+    rx_packets: int
+    rx_errors: int
+    rx_drops: int
+    tx_bytes: int
+    tx_packets: int
+    tx_errors: int
+    tx_drops: int
+    timestamp: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def proc_file() -> str:
+        """Return the path to ``/proc/net/dev``."""
+        return "/proc/net/dev"
+
+    @classmethod
+    def parse(cls, raw: str) -> Self | None:
+        """Parse ``/proc/net/dev`` and aggregate across non-loopback interfaces."""
+        totals = [0] * 8
+        found_any = False
+
+        for line in raw.splitlines():
+            line = line.strip()
+            if ":" not in line:
+                continue
+            iface, _, rest = line.partition(":")
+            iface = iface.strip()
+            # Skip loopback
+            if iface == "lo":
+                continue
+            parts = rest.split()
+            if len(parts) < 16:
+                continue
+            try:
+                # Receive:  bytes packets errs drop fifo frame compressed multicast
+                # Transmit: bytes packets errs drop fifo colls carrier compressed
+                totals[0] += int(parts[0])  # rx_bytes
+                totals[1] += int(parts[1])  # rx_packets
+                totals[2] += int(parts[2])  # rx_errors
+                totals[3] += int(parts[3])  # rx_drops
+                totals[4] += int(parts[8])  # tx_bytes
+                totals[5] += int(parts[9])  # tx_packets
+                totals[6] += int(parts[10])  # tx_errors
+                totals[7] += int(parts[11])  # tx_drops
+            except (IndexError, ValueError):
+                continue
+            found_any = True
+
+        if not found_any:
+            return None
+
+        return cls(
+            rx_bytes=totals[0],
+            rx_packets=totals[1],
+            rx_errors=totals[2],
+            rx_drops=totals[3],
+            tx_bytes=totals[4],
+            tx_packets=totals[5],
+            tx_errors=totals[6],
+            tx_drops=totals[7],
+            timestamp=time.monotonic(),
+        )
+
+    def diff(self, after: Self) -> dict[str, int]:
+        """Compute network counter deltas between *self* and *after*."""
+        return {
+            "rx_bytes": after.rx_bytes - self.rx_bytes,
+            "rx_packets": after.rx_packets - self.rx_packets,
+            "rx_errors": after.rx_errors - self.rx_errors,
+            "rx_drops": after.rx_drops - self.rx_drops,
+            "tx_bytes": after.tx_bytes - self.tx_bytes,
+            "tx_packets": after.tx_packets - self.tx_packets,
+            "tx_errors": after.tx_errors - self.tx_errors,
+            "tx_drops": after.tx_drops - self.tx_drops,
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class HostMetricsSnapshot:
     """A single point-in-time snapshot of host resource usage."""
 
@@ -232,14 +343,8 @@ class HostMetricsSnapshot:
     cpu: CpuSnapshot | None = None
     memory: MemorySnapshot | None = None
     io: IoSnapshot | None = None
+    net: NetSnapshot | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the snapshot to a JSON-friendly dictionary."""
-        result: dict[str, Any] = {"label": self.label}
-        if self.cpu:
-            result["cpu"] = self.cpu.to_dict()
-        if self.memory:
-            result["memory"] = self.memory.to_dict()
-        if self.io:
-            result["io"] = self.io.to_dict()
-        return result
+        return dataclasses.asdict(self)

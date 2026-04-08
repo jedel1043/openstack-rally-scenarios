@@ -961,3 +961,50 @@ class SplitStress(scenario.Scenario):
                     },
                 }
             )
+
+        # --- Network deltas table — all hosts combined ---
+        net_rows: list[list[str]] = []
+        for hlabel in host_labels:
+            snaps = host_snapshots[hlabel]
+            for i in range(1, len(snaps)):
+                b = snaps[i - 1].net
+                a = snaps[i].net
+                if b and a:
+                    delta = b.diff(a)
+                    net_rows.append(
+                        [
+                            hlabel,
+                            f"{snaps[i - 1].label} -> {snaps[i].label}",
+                            str(delta["rx_bytes"]),
+                            str(delta["rx_packets"]),
+                            str(delta["rx_errors"]),
+                            str(delta["rx_drops"]),
+                            str(delta["tx_bytes"]),
+                            str(delta["tx_packets"]),
+                            str(delta["tx_errors"]),
+                            str(delta["tx_drops"]),
+                        ]
+                    )
+        if net_rows:
+            self.add_output(
+                complete={
+                    "title": "Host Network Between Samples — All Hosts",
+                    "description": "Network counter deltas between snapshots per host",
+                    "chart_plugin": "Table",
+                    "data": {
+                        "cols": [
+                            "Host",
+                            "Interval",
+                            "RX Bytes",
+                            "RX Packets",
+                            "RX Errors",
+                            "RX Drops",
+                            "TX Bytes",
+                            "TX Packets",
+                            "TX Errors",
+                            "TX Drops",
+                        ],
+                        "rows": net_rows,
+                    },
+                }
+            )

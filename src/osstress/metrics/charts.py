@@ -29,7 +29,9 @@ def build_rally_output_charts(
         points: list[list[Any]] = []
         for idx, snap in enumerate(host_snapshots[hlabel]):
             if snap.memory:
-                points.append([idx, snap.memory.mem_used_pct])
+                mem_total = snap.memory.mem_total_kb
+                mem_used_pct = round(snap.memory.mem_used_kb / mem_total * 100, 2) if mem_total else 0.0
+                points.append([idx, mem_used_pct])
         if points:
             mem_series.append(["%s Memory Used %%" % hlabel, points])
     if mem_series:
@@ -109,22 +111,72 @@ def build_rally_output_charts(
             }
         )
 
+    # ---- Network throughput — one series per host --------------------------
+    net_rx_series: list[list[Any]] = []
+    net_tx_series: list[list[Any]] = []
+    for hlabel in host_labels:
+        snaps = host_snapshots[hlabel]
+        rx_points: list[list[Any]] = []
+        tx_points: list[list[Any]] = []
+        for idx in range(1, len(snaps)):
+            b_net = snaps[idx - 1].net
+            a_net = snaps[idx].net
+            if b_net and a_net:
+                delta = b_net.diff(a_net)
+                rx_points.append([idx, delta["rx_bytes"]])
+                tx_points.append([idx, delta["tx_bytes"]])
+        if rx_points:
+            net_rx_series.append(["%s RX Bytes" % hlabel, rx_points])
+        if tx_points:
+            net_tx_series.append(["%s TX Bytes" % hlabel, tx_points])
+    if net_rx_series:
+        charts.append(
+            {
+                "title": "Host Network RX (bytes) — All Hosts",
+                "description": (
+                    "Bytes received between consecutive sample points, "
+                    "one series per host"
+                ),
+                "chart_plugin": "Lines",
+                "data": net_rx_series,
+                "label": "Bytes",
+                "axis_label": "Sample",
+            }
+        )
+    if net_tx_series:
+        charts.append(
+            {
+                "title": "Host Network TX (bytes) — All Hosts",
+                "description": (
+                    "Bytes transmitted between consecutive sample points, "
+                    "one series per host"
+                ),
+                "chart_plugin": "Lines",
+                "data": net_tx_series,
+                "label": "Bytes",
+                "axis_label": "Sample",
+            }
+        )
+
     # ---- Raw snapshot table — one row per (host, sample) -------------------
     table_rows: list[list[str]] = []
     for hlabel in host_labels:
         for snap in host_snapshots[hlabel]:
             d = snap.to_dict()
-            mem = d.get("memory", {})
-            io_data = d.get("io", {})
+            mem = d.get("memory") or {}
+            io_data = d.get("io") or {}
+            net_data = d.get("net") or {}
             table_rows.append(
                 [
                     hlabel,
                     snap.label,
-                    str(mem.get("mem_used_pct", "N/A")),
+                    str(round(mem["mem_used_kb"] / mem["mem_total_kb"] * 100, 2) if mem.get("mem_total_kb") else "N/A"),
                     str(mem.get("mem_total_kb", "N/A")),
                     str(io_data.get("reads_completed", "N/A")),
                     str(io_data.get("writes_completed", "N/A")),
                     str(io_data.get("ios_in_progress", "N/A")),
+                    str(net_data.get("rx_bytes", "N/A")),
+                    str(net_data.get("tx_bytes", "N/A")),
                 ]
             )
     if table_rows:
@@ -142,6 +194,8 @@ def build_rally_output_charts(
                         "Disk Reads",
                         "Disk Writes",
                         "IOs In Progress",
+                        "Net RX Bytes",
+                        "Net TX Bytes",
                     ],
                     "rows": table_rows,
                 },
